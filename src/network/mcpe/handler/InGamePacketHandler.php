@@ -35,6 +35,7 @@ use pocketmine\inventory\transaction\InventoryTransaction;
 use pocketmine\inventory\transaction\TransactionBuilder;
 use pocketmine\inventory\transaction\TransactionCancelledException;
 use pocketmine\inventory\transaction\TransactionValidationException;
+use pocketmine\item\GoatHorn;
 use pocketmine\item\ItemUseResult;
 use pocketmine\item\VanillaItems;
 use pocketmine\item\WritableBook;
@@ -497,13 +498,15 @@ class InGamePacketHandler extends PacketHandler{
 				return true;
 			case UseItemTransactionData::ACTION_CLICK_AIR:
 				if($this->player->isUsingItem()){
+					$heldItem = $this->player->getInventory()->getItemInHand();
 					$result = $this->player->tryConsumeHeldItem();
 					if($result === ItemUseResult::FAIL){
 						$hungerAttr = $this->player->getAttributeMap()->get(Attribute::HUNGER) ?? throw new AssumptionFailedError();
 						$hungerAttr->markSynchronized(false);
-						//TODO: workaround goat horns getting stuck in the "using item" state
-						//this timed-trigger behaviour is also used for other items apart from food
-						//in the future we'll generalise this logic and add proper hooks for it
+					}
+					//Goat horns auto-finish their use animation clientside without sending a matching release packet.
+					//Only clear the flag for those items so release-based items like bows don't flicker under latency.
+					if($heldItem instanceof GoatHorn){
 						$this->player->setUsingItem(false);
 					}
 					return true;
