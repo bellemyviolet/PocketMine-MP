@@ -384,9 +384,12 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 					$this->callDummyItemHeldEvent();
 				}
 			},
-			function() : void{
-				$this->setUsingItem(false);
-				$this->callDummyItemHeldEvent();
+			function(Inventory $unused, array $oldContents) : void{
+				$heldIndex = $this->inventory->getHeldItemIndex();
+				if(!isset($oldContents[$heldIndex]) || !$oldContents[$heldIndex]->equalsExact($this->inventory->getItem($heldIndex))){
+					$this->setUsingItem(false);
+					$this->callDummyItemHeldEvent();
+				}
 			}
 		));
 
@@ -1960,7 +1963,9 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 	 * @return bool if it did something
 	 */
 	public function interactBlock(Vector3 $pos, int $face, Vector3 $clickOffset) : bool{
-		$this->setUsingItem(false);
+		if(!($this->isUsingItem() && $this->inventory->getItemInHand() instanceof Releasable)){
+			$this->setUsingItem(false);
+		}
 
 		if($this->canInteract($pos->add(0.5, 0.5, 0.5), $this->isCreative() ? self::MAX_REACH_DISTANCE_CREATIVE : self::MAX_REACH_DISTANCE_SURVIVAL)){
 			$this->broadcastAnimation(new ArmSwingAnimation($this), $this->getViewers());
