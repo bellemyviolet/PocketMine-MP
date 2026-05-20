@@ -1,0 +1,77 @@
+name: Stable Phar Release
+
+on:
+  push:
+    branches:
+      - stable
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: stable-phar-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-release:
+    name: Build and publish PocketMine-MP.phar
+    if: github.ref_name == 'stable'
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup PMMP PHP
+        uses: pmmp/setup-php-action@3.2.0
+        with:
+          php-version: "8.4"
+          install-path: "./bin"
+          pm-version-major: 5
+
+      - name: Restore Composer package cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/composer/files
+            ~/.cache/composer/vcs
+          key: composer-v2-release-${{ hashFiles('./composer.lock') }}
+          restore-keys: |
+            composer-v2-release-
+            composer-v2-cache-
+
+      - name: Install production dependencies
+        run: composer install --classmap-authoritative --no-dev --prefer-dist --no-interaction --ignore-platform-reqs
+
+      - name: Build phar
+        run: |
+          mkdir -p artifacts
+          php -dphar.readonly=0 build/server-phar.php \
+            --out artifacts/PocketMine-MP.phar \
+            --git "${GITHUB_SHA}" \
+            --build "${GITHUB_RUN_NUMBER}"
+
+      - name: Generate checksum
+        run: |
+          cd artifacts
+          sha256sum PocketMine-MP.phar > PocketMine-MP.phar.sha256
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: stable-${{ github.sha }}
+          RELEASE_NAME: Stable ${{ github.sha }}
+        run: |
+          if gh release view "${TAG_NAME}" >/dev/null 2>&1; then
+            gh release delete "${TAG_NAME}" --yes --cleanup-tag
+          fi
+
+          gh release create "${TAG_NAME}" \
+            artifacts/PocketMine-MP.phar \
+            artifacts/PocketMine-MP.phar.sha256 \
+            --target "${GITHUB_SHA}" \
+            --title "${RELEASE_NAME}" \
+            --notes "Automated stable branch phar build for ${GITHUB_SHA}."
