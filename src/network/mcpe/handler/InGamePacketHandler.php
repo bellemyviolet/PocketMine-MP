@@ -35,6 +35,7 @@ use pocketmine\inventory\transaction\InventoryTransaction;
 use pocketmine\inventory\transaction\TransactionBuilder;
 use pocketmine\inventory\transaction\TransactionCancelledException;
 use pocketmine\inventory\transaction\TransactionValidationException;
+use pocketmine\item\ItemUseResult;
 use pocketmine\item\VanillaItems;
 use pocketmine\item\WritableBook;
 use pocketmine\item\WritableBookPage;
@@ -496,14 +497,15 @@ class InGamePacketHandler extends PacketHandler{
 				return true;
 			case UseItemTransactionData::ACTION_CLICK_AIR:
 				if($this->player->isUsingItem()){
-					if(!$this->player->consumeHeldItem()){
+					$result = $this->player->tryConsumeHeldItem();
+					if($result === ItemUseResult::FAIL){
 						$hungerAttr = $this->player->getAttributeMap()->get(Attribute::HUNGER) ?? throw new AssumptionFailedError();
 						$hungerAttr->markSynchronized(false);
+						//TODO: workaround goat horns getting stuck in the "using item" state
+						//this timed-trigger behaviour is also used for other items apart from food
+						//in the future we'll generalise this logic and add proper hooks for it
+						$this->player->setUsingItem(false);
 					}
-					//TODO: workaround goat horns getting stuck in the "using item" state
-					//this timed-trigger behaviour is also used for other items apart from food
-					//in the future we'll generalise this logic and add proper hooks for it
-					$this->player->setUsingItem(false);
 					return true;
 				}
 				$this->player->useHeldItem();

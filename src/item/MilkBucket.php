@@ -27,6 +27,7 @@ use pocketmine\entity\Living;
 use pocketmine\player\Player;
 
 class MilkBucket extends Item implements ConsumableItem{
+	private const CONSUME_DURATION = 32;
 
 	public function getMaxStackSize() : int{
 		return 1;
@@ -42,6 +43,10 @@ class MilkBucket extends Item implements ConsumableItem{
 
 	public function onConsume(Living $consumer) : void{
 		$consumer->getEffects()->clear();
+	}
+
+	public function getConsumeDuration() : int{
+		return self::CONSUME_DURATION;
 	}
 
 	public function canStartUsingItem(Player $player) : bool{

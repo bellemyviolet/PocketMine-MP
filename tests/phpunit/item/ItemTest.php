@@ -145,4 +145,12 @@ class ItemTest extends TestCase{
 		$this->item->removeEnchantment(VanillaEnchantments::SHARPNESS());
 		self::assertNull($this->item->getNamedTag()->getTag(Item::TAG_ENCH));
 	}
+
+	public function testConsumeDurations() : void{
+		self::assertSame(32, VanillaItems::BREAD()->getConsumeDuration());
+		self::assertSame(16, VanillaItems::DRIED_KELP()->getConsumeDuration());
+		self::assertSame(32, VanillaItems::POTION()->getConsumeDuration());
+		self::assertSame(32, VanillaItems::MILK_BUCKET()->getConsumeDuration());
+		self::assertSame(32, VanillaItems::MEDICINE()->getConsumeDuration());
+	}
 }

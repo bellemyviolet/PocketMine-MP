@@ -1741,8 +1741,19 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 	 * @return bool if the consumption succeeded.
 	 */
 	public function consumeHeldItem() : bool{
+		return $this->tryConsumeHeldItem() === ItemUseResult::SUCCESS;
+	}
+
+	/**
+	 * Consumes the currently-held item if the item has been used for long enough.
+	 */
+	public function tryConsumeHeldItem() : ItemUseResult{
 		$slot = $this->inventory->getItemInHand();
 		if($slot instanceof ConsumableItem){
+			if($this->getItemUseDuration() < $slot->getConsumeDuration()){
+				return ItemUseResult::NONE;
+			}
+
 			$oldItem = clone $slot;
 
 			$residue = $slot->getResidue();
@@ -1762,10 +1773,10 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 			$slot->pop();
 			$this->returnItemsFromAction($oldItem, $slot, $ev->getResidue());
 
-			return true;
+			return ItemUseResult::SUCCESS;
 		}
 
-		return false;
+		return ItemUseResult::FAIL;
 	}
 
 	/**

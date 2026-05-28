@@ -35,4 +35,9 @@ interface ConsumableItem extends Consumable, Releasable{
 	 * be an Item to add to a Player's inventory afterwards (such as a bowl).
 	 */
 	public function getResidue() : Item;
+
+	/**
+	 * Returns the minimum number of ticks that the item must be used before it can be consumed.
+	 */
+	public function getConsumeDuration() : int;
 }

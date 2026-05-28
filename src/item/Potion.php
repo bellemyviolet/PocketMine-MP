@@ -29,6 +29,7 @@ use pocketmine\player\Player;
 use pocketmine\world\sound\BottleEmptySound;
 
 class Potion extends Item implements ConsumableItem{
+	private const CONSUME_DURATION = 32;
 
 	private PotionType $potionType = PotionType::WATER;
 
@@ -61,6 +62,10 @@ class Potion extends Item implements ConsumableItem{
 
 	public function getResidue() : Item{
 		return VanillaItems::GLASS_BOTTLE();
+	}
+
+	public function getConsumeDuration() : int{
+		return self::CONSUME_DURATION;
 	}
 
 	public function canStartUsingItem(Player $player) : bool{

@@ -27,6 +27,8 @@ use pocketmine\entity\Living;
 use pocketmine\player\Player;
 
 abstract class Food extends Item implements FoodSourceItem{
+	public const DEFAULT_CONSUME_DURATION = 32;
+
 	public function requiresHunger() : bool{
 		return true;
 	}
@@ -41,6 +43,10 @@ abstract class Food extends Item implements FoodSourceItem{
 
 	public function onConsume(Living $consumer) : void{
 
+	}
+
+	public function getConsumeDuration() : int{
+		return self::DEFAULT_CONSUME_DURATION;
 	}
 
 	public function canStartUsingItem(Player $player) : bool{

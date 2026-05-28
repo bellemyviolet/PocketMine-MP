@@ -28,6 +28,7 @@ use pocketmine\entity\Living;
 use pocketmine\player\Player;
 
 class Medicine extends Item implements ConsumableItem{
+	private const CONSUME_DURATION = 32;
 
 	private MedicineType $medicineType = MedicineType::EYE_DROPS;
 
@@ -59,6 +60,10 @@ class Medicine extends Item implements ConsumableItem{
 
 	public function getResidue() : Item{
 		return VanillaItems::GLASS_BOTTLE();
+	}
+
+	public function getConsumeDuration() : int{
+		return self::CONSUME_DURATION;
 	}
 
 	public function canStartUsingItem(Player $player) : bool{

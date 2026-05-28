@@ -24,6 +24,7 @@ declare(strict_types=1);
 namespace pocketmine\item;
 
 class DriedKelp extends Food{
+	private const CONSUME_DURATION = 16;
 
 	public function getFoodRestore() : int{
 		return 1;
@@ -31,5 +32,9 @@ class DriedKelp extends Food{
 
 	public function getSaturationRestore() : float{
 		return 0.6;
+	}
+
+	public function getConsumeDuration() : int{
+		return self::CONSUME_DURATION;
 	}
 }
