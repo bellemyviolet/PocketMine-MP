@@ -1764,7 +1764,7 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 			$ev->call();
 
 			if($ev->isCancelled() || !$this->consumeObject($slot)){
-				return false;
+				return ItemUseResult::FAIL;
 			}
 
 			$this->setUsingItem(false);
