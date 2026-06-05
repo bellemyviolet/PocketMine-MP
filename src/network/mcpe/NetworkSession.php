@@ -29,7 +29,6 @@ use pmmp\encoding\DataDecodeException;
 use pocketmine\entity\effect\EffectInstance;
 use pocketmine\event\player\PlayerDuplicateLoginEvent;
 use pocketmine\event\player\PlayerResourcePackOfferEvent;
-use pocketmine\event\player\SessionDisconnectEvent;
 use pocketmine\event\server\DataPacketDecodeEvent;
 use pocketmine\event\server\DataPacketReceiveEvent;
 use pocketmine\event\server\DataPacketSendEvent;
@@ -435,34 +434,14 @@ class NetworkSession{
 			}
 
 			if($this->enableCompression){
-				if($this->protocolId >= ProtocolInfo::PROTOCOL_1_20_60){
-					$compressionType = ord($payload[0]);
-					$compressed = substr($payload, 1);
-					if($compressionType === CompressionAlgorithm::NONE){
-						$decompressed = $compressed;
-					}elseif($compressionType === $this->compressor->getNetworkId()){
-						try{
-							Timings::$playerNetworkReceiveDecompress->startTiming();
-							$decompressed = $this->compressor->decompress($compressed);
-						}catch(DecompressionException $e){
-							$this->logger->debug("Failed to decompress packet: " . base64_encode($compressed));
-							throw PacketHandlingException::wrap($e, "Compressed packet batch decode error");
-						}finally{
-							Timings::$playerNetworkReceiveDecompress->stopTiming();
-						}
-					}else{
-						throw new PacketHandlingException("Packet compressed with unexpected compression type $compressionType");
-					}
-				}else{
-					try{
-						Timings::$playerNetworkReceiveDecompress->startTiming();
-						$decompressed = $this->compressor->decompress($payload);
-					}catch(DecompressionException $e){
-						$this->logger->debug("Failed to decompress packet: " . base64_encode($payload));
-						throw PacketHandlingException::wrap($e, "Compressed packet batch decode error");
-					}finally{
-						Timings::$playerNetworkReceiveDecompress->stopTiming();
-					}
+				try{
+					Timings::$playerNetworkReceiveDecompress->startTiming();
+					$decompressed = $this->compressor->decompress($payload);
+				}catch(DecompressionException $e){
+					$this->logger->debug("Failed to decompress packet: " . base64_encode($payload));
+					throw PacketHandlingException::wrap($e, "Compressed packet batch decode error");
+				}finally{
+					Timings::$playerNetworkReceiveDecompress->stopTiming();
 				}
 			}else{
 				$decompressed = $payload;
@@ -821,9 +800,6 @@ class NetworkSession{
 		if($this->connected && !$this->disconnectGuard){
 			$this->disconnectGuard = true;
 			$func();
-
-			$event = new SessionDisconnectEvent($this);
-			$event->call();
 
 			/** [BETTERPMMP-PATCH] Keep disconnectGuard active through full cleanup - session is never reused */
 			$this->flushGamePacketQueue();
