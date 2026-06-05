@@ -210,8 +210,6 @@ class World implements ChunkManager{
 	 */
 	private array $blockCache = [];
 	private int $blockCacheSize = 0;
-	/** [BETTERPMMP-PATCH] Configurable block cache cap */
-	private int $blockCacheSizeCap = 2048;
 	/**
 	 * @var AxisAlignedBB[][][] chunkHash => [relativeBlockHash => AxisAlignedBB[]]
 	 * @phpstan-var array<ChunkPosHash, array<ChunkBlockPosHash, list<AxisAlignedBB>>>
@@ -549,30 +547,8 @@ class World implements ChunkManager{
 			$this->chunkTickRadius = 0;
 		}
 		$this->tickedBlocksPerSubchunkPerTick = $cfg->getPropertyInt(YmlServerProperties::CHUNK_TICKING_BLOCKS_PER_SUBCHUNK_PER_TICK, self::DEFAULT_TICKED_BLOCKS_PER_SUBCHUNK_PER_TICK);
-		/** [BETTERPMMP-PATCH] Per-world chunk ticking override.
-		 * tick-radius is clamped to this world's effective view-distance (per-world override if set, else server.properties),
-		 * NOT to the global server view-distance, so a world configured with a larger view-distance can also tick farther. */
-		$perWorldChunkTicking = $cfg->getProperty('better-pmmp.per-world-chunk-ticking', []);
-		if(is_array($perWorldChunkTicking) && isset($perWorldChunkTicking[$this->folderName])){
-			$worldTickCfg = $perWorldChunkTicking[$this->folderName];
-			if(is_array($worldTickCfg)){
-				if(isset($worldTickCfg['tick-radius'])){
-					$perWorldViewDistanceMap = $cfg->getProperty('better-pmmp.per-world-view-distance', []);
-					$worldViewDistance = $this->server->getViewDistance();
-					if(is_array($perWorldViewDistanceMap) && isset($perWorldViewDistanceMap[$this->folderName])){
-						$worldViewDistance = max(2, (int) $perWorldViewDistanceMap[$this->folderName]);
-					}
-					$this->chunkTickRadius = min($worldViewDistance, max(0, (int) $worldTickCfg['tick-radius']));
-				}
-				if(isset($worldTickCfg['blocks-per-subchunk-per-tick'])){
-					$this->tickedBlocksPerSubchunkPerTick = max(0, (int) $worldTickCfg['blocks-per-subchunk-per-tick']);
-				}
-			}
-		}
 		$this->maxConcurrentChunkPopulationTasks = $cfg->getPropertyInt(YmlServerProperties::CHUNK_GENERATION_POPULATION_QUEUE_SIZE, 2);
 
-		/** [BETTERPMMP-PATCH] Block cache size from config */
-		$this->blockCacheSizeCap = max(512, (int) $this->server->getConfigGroup()->getProperty('better-pmmp.block-cache-size', 8192));
 		$this->initRandomTickBlocksFromConfig($cfg);
 
 		$this->timings = new WorldTimings($this);
@@ -657,13 +633,7 @@ class World implements ChunkManager{
 			$this->unloadChunk($chunkX, $chunkZ, false);
 		}
 		$this->knownUngeneratedChunks = [];
-		/** [BETTERPMMP-PATCH] Safe entity iteration during world unload - snapshot keys to avoid modification during iteration */
-		$chunkHashes = array_keys($this->entitiesByChunk);
-		foreach($chunkHashes as $chunkHash){
-			if(!isset($this->entitiesByChunk[$chunkHash])){
-				continue;
-			}
-			$entities = $this->entitiesByChunk[$chunkHash];
+		foreach($this->entitiesByChunk as $chunkHash => $entities){
 			self::getXZ($chunkHash, $chunkX, $chunkZ);
 
 			$leakedEntities = 0;
@@ -671,9 +641,7 @@ class World implements ChunkManager{
 				if(!$entity->isFlaggedForDespawn()){
 					$leakedEntities++;
 				}
-				if(!$entity->isClosed()){
-					$entity->close();
-				}
+				$entity->close();
 			}
 			if($leakedEntities !== 0){
 				$this->logger->warning("$leakedEntities leaked entities found in ungenerated chunk $chunkX $chunkZ during unload, they won't be saved!");
@@ -727,13 +695,7 @@ class World implements ChunkManager{
 	 * @param Player[]|null $players
 	 */
 	public function addSound(Vector3 $pos, Sound $sound, ?array $players = null) : void{
-		/** [BETTERPMMP-PATCH] FPS optimization: sound distance filter */
-		$fpsImplicit = $players === null;
 		$players ??= $this->getViewersForPosition($pos);
-		if($fpsImplicit){
-			$players = $this->filterFpsViewersByDistanceSq($pos, $players, 'sound-distance', 32.0);
-			if(count($players) === 0) return;
-		}
 
 		if(WorldSoundEvent::hasHandlers()){
 			$ev = new WorldSoundEvent($this, $sound, $pos, $players);
@@ -762,13 +724,7 @@ class World implements ChunkManager{
 	 * @param Player[]|null $players
 	 */
 	public function addParticle(Vector3 $pos, Particle $particle, ?array $players = null) : void{
-		/** [BETTERPMMP-PATCH] FPS optimization: particle distance filter */
-		$fpsImplicit = $players === null;
 		$players ??= $this->getViewersForPosition($pos);
-		if($fpsImplicit){
-			$players = $this->filterFpsViewersByDistanceSq($pos, $players, 'particle-distance', 48.0);
-			if(count($players) === 0) return;
-		}
 
 		if(WorldParticleEvent::hasHandlers()){
 			$ev = new WorldParticleEvent($this, $particle, $pos, $players);
@@ -832,28 +788,6 @@ class World implements ChunkManager{
 	 */
 	public function getViewersForPosition(Vector3 $pos) : array{
 		return $this->getChunkPlayers($pos->getFloorX() >> Chunk::COORD_BIT_SIZE, $pos->getFloorZ() >> Chunk::COORD_BIT_SIZE);
-	}
-
-	/**
-	 * [BETTERPMMP-PATCH] FPS optimization: filter viewers by squared distance from a position.
-	 * @param array<int, \pocketmine\player\Player> $viewers
-	 * @return array<int, \pocketmine\player\Player>
-	 */
-	private function filterFpsViewersByDistanceSq(Vector3 $pos, array $viewers, string $key, float $default) : array{
-		if(count($viewers) === 0) return $viewers;
-		$config = $this->server->getConfigGroup();
-		if(!(bool) $config->getProperty('better-pmmp.fps-optimization.particle-sound.enabled', true)) return $viewers;
-		$maxDist = (float) $config->getProperty('better-pmmp.fps-optimization.particle-sound.' . $key, $default);
-		if($maxDist <= 0) return $viewers;
-		$maxSq = $maxDist * $maxDist;
-		$px = $pos->x; $pz = $pos->z;
-		$out = [];
-		foreach($viewers as $k => $pl){
-			$loc = $pl->getLocation();
-			$dx = $loc->x - $px; $dz = $loc->z - $pz;
-			if($dx * $dx + $dz * $dz <= $maxSq) $out[$k] = $pl;
-		}
-		return $out;
 	}
 
 	/**
@@ -1032,14 +966,8 @@ class World implements ChunkManager{
 		$this->timings->scheduledBlockUpdates->stopTiming();
 
 		$this->timings->neighbourBlockUpdates->startTiming();
-		/** [BETTERPMMP-PATCH] Neighbour block update throttle */
-		$neighbourUpdateLimit = (int) $this->server->getConfigGroup()->getProperty('better-pmmp.neighbour-update-limit', 512);
-		$neighbourUpdateCount = 0;
+		//Normal updates
 		while($this->neighbourBlockUpdateQueue->count() > 0){
-			if($neighbourUpdateLimit > 0 && $neighbourUpdateCount >= $neighbourUpdateLimit){
-				break;
-			}
-			$neighbourUpdateCount++;
 			$index = $this->neighbourBlockUpdateQueue->dequeue();
 			unset($this->neighbourBlockUpdateQueueIndex[$index]);
 			World::getBlockXYZ($index, $x, $y, $z);
@@ -1065,12 +993,12 @@ class World implements ChunkManager{
 		$this->timings->neighbourBlockUpdates->stopTiming();
 
 		$this->timings->entityTick->startTiming();
-		/** [BETTERPMMP-PATCH] Entity tick close guard - prevents redundant close() on already-closed entities */
+		//Update entities that need update
 		foreach($this->updateEntities as $id => $entity){
 			if($entity->isClosed() || $entity->isFlaggedForDespawn() || !$entity->onUpdate($currentTick)){
 				unset($this->updateEntities[$id]);
 			}
-			if(!$entity->isClosed() && $entity->isFlaggedForDespawn()){
+			if($entity->isFlaggedForDespawn()){
 				$entity->close();
 			}
 		}
@@ -1217,7 +1145,7 @@ class World implements ChunkManager{
 			$this->blockCacheSize = 0;
 			foreach($this->blockCache as $list){
 				$this->blockCacheSize += count($list);
-				if($this->blockCacheSize > $this->blockCacheSizeCap){
+				if($this->blockCacheSize > self::BLOCK_CACHE_SIZE_CAP){
 					$this->blockCache = [];
 					$this->blockCacheSize = 0;
 					break;
@@ -1227,7 +1155,7 @@ class World implements ChunkManager{
 			$count = 0;
 			foreach($this->blockCollisionBoxCache as $list){
 				$count += count($list);
-				if($count > $this->blockCacheSizeCap){
+				if($count > self::BLOCK_CACHE_SIZE_CAP){
 					//TODO: Is this really the best logic?
 					$this->blockCollisionBoxCache = [];
 					break;
@@ -1243,7 +1171,7 @@ class World implements ChunkManager{
 		foreach($this->blockCache as $chunkHash => $blocks){
 			unset($this->blockCache[$chunkHash]);
 			$this->blockCacheSize -= count($blocks);
-			if($this->blockCacheSize < $this->blockCacheSizeCap){
+			if($this->blockCacheSize < self::BLOCK_CACHE_SIZE_CAP){
 				break;
 			}
 		}
@@ -1330,28 +1258,18 @@ class World implements ChunkManager{
 			return;
 		}
 
-		/** [BETTERPMMP-PATCH] Batch recheck limit for chunk tick optimization */
 		if(count($this->recheckTickingChunks) > 0){
 			$this->timings->randomChunkUpdatesChunkSelection->startTiming();
 
 			$chunkTickableCache = [];
-			$batchLimit = (int) $this->server->getConfigGroup()->getProperty('better-pmmp.chunk-optimization.batch-recheck-limit', 64);
-			$processed = 0;
 
 			foreach($this->recheckTickingChunks as $hash => $_){
-				if($batchLimit > 0 && $processed >= $batchLimit){
-					break;
-				}
 				World::getXZ($hash, $chunkX, $chunkZ);
 				if($this->isChunkTickable($chunkX, $chunkZ, $chunkTickableCache)){
 					$this->validTickingChunks[$hash] = $hash;
 				}
-				unset($this->recheckTickingChunks[$hash]);
-				$processed++;
 			}
-			if($batchLimit <= 0 || $processed < $batchLimit){
-				$this->recheckTickingChunks = [];
-			}
+			$this->recheckTickingChunks = [];
 
 			$this->timings->randomChunkUpdatesChunkSelection->stopTiming();
 		}
@@ -1427,22 +1345,10 @@ class World implements ChunkManager{
 		}
 	}
 
-	/** [BETTERPMMP-PATCH] Fixed light values bypass - skip LightPopulationTask when enabled */
 	private function orderLightPopulation(int $chunkX, int $chunkZ) : void{
 		$chunkHash = World::chunkHash($chunkX, $chunkZ);
 		$lightPopulatedState = $this->chunks[$chunkHash]->isLightPopulated();
 		if($lightPopulatedState === false){
-			if((bool) $this->server->getConfigGroup()->getProperty('better-pmmp.fixed-light.enabled', false)){
-				$fixedLevel = min(15, max(0, (int) $this->server->getConfigGroup()->getProperty('better-pmmp.fixed-light.level', 15)));
-				$targetChunk = $this->chunks[$chunkHash];
-				foreach($targetChunk->getSubChunks() as $subY => $subChunk){
-					$subChunk->setBlockSkyLightArray(LightArray::fill($fixedLevel));
-					$subChunk->setBlockLightArray(LightArray::fill($fixedLevel));
-				}
-				$targetChunk->setLightPopulated(true);
-				$this->markTickingChunkForRecheck($chunkX, $chunkZ);
-				return;
-			}
 			$this->chunks[$chunkHash]->setLightPopulated(null);
 			$this->markTickingChunkForRecheck($chunkX, $chunkZ);
 
@@ -2099,7 +2005,7 @@ class World implements ChunkManager{
 		if($addToCache && $relativeBlockHash !== null){
 			$this->blockCache[$chunkHash][$relativeBlockHash] = $block;
 
-			if(++$this->blockCacheSize >= $this->blockCacheSizeCap){
+			if(++$this->blockCacheSize >= self::BLOCK_CACHE_SIZE_CAP){
 				$this->trimBlockCache();
 			}
 		}
@@ -3235,14 +3141,11 @@ class World implements ChunkManager{
 				$listener->onChunkUnloaded($x, $z, $chunk);
 			}
 
-			/** [BETTERPMMP-PATCH] Guard against double-close during chunk unload */
 			foreach($this->getChunkEntities($x, $z) as $entity){
 				if($entity instanceof Player){
 					continue;
 				}
-				if(!$entity->isClosed()){
-					$entity->close();
-				}
+				$entity->close();
 			}
 
 			$chunk->onUnload();

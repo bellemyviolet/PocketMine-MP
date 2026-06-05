@@ -157,7 +157,7 @@ class NetworkSession{
 
 	private \PrefixedLogger $logger;
 	private ?Player $player = null;
-	protected ?PlayerInfo $info = null;
+	private ?PlayerInfo $info = null;
 	private ?int $ping = null;
 
 	private ?PacketHandler $handler = null;
@@ -169,7 +169,7 @@ class NetworkSession{
 
 	private bool $connected = true;
 	private bool $disconnectGuard = false;
-	protected bool $loggedIn = false;
+	private bool $loggedIn = false;
 	private bool $authenticated = false;
 	private int $connectTime;
 	private ?CompoundTag $cachedOfflinePlayerData = null;
@@ -190,8 +190,7 @@ class NetworkSession{
 	/** @phpstan-var \SplQueue<array{CompressBatchPromise|string, list<PromiseResolver<true>>, bool}> */
 	private \SplQueue $compressedQueue;
 	private bool $forceAsyncCompression = true;
-	private ?int $protocolId = null;
-	protected bool $enableCompression = false; //disabled until handshake completed
+	private bool $enableCompression = false; //disabled until handshake completed
 
 	private int $nextAckReceiptId = 0;
 	/**
@@ -215,7 +214,7 @@ class NetworkSession{
 		private Server $server,
 		private NetworkSessionManager $manager,
 		private PacketPool $packetPool,
-		protected PacketSender $sender,
+		private PacketSender $sender,
 		private PacketBroadcaster $broadcaster,
 		private EntityEventBroadcaster $entityEventBroadcaster,
 		private Compressor $compressor,
@@ -358,9 +357,8 @@ class NetworkSession{
 		return $this->handler;
 	}
 
-	/** [BETTERPMMP-PATCH] setHandler disconnect guard - prevents handler assignment during disconnect cleanup */
 	public function setHandler(?PacketHandler $handler) : void{
-		if($this->connected && !$this->disconnectGuard){
+		if($this->connected){ //TODO: this is fine since we can't handle anything from a disconnected session, but it might produce surprises in some cases
 			$this->handler = $handler;
 			if($this->handler !== null){
 				$this->handlerActions = PacketHandlerInspector::getHandlerActions($this->handler);
@@ -383,26 +381,6 @@ class NetworkSession{
 		$this->noisyPacketsDropped = 0;
 
 		return false;
-	}
-
-	public function setProtocolId(int $protocolId) : void{
-		$this->protocolId = $protocolId;
-
-		$this->typeConverter = TypeConverter::getInstance($protocolId);
-		$this->broadcaster = $this->server->getPacketBroadcaster($protocolId);
-		$this->entityEventBroadcaster = $this->server->getEntityEventBroadcaster($this->broadcaster, $this->typeConverter);
-	}
-
-	public function getProtocolId() : int{
-		return $this->protocolId ?? ProtocolInfo::CURRENT_PROTOCOL;
-	}
-
-	/**
-	 * @return \Closure[]|ObjectSet
-	 * @phpstan-return ObjectSet<\Closure() : void>
-	 */
-	public function getDisposeHooks() : ObjectSet{
-		return $this->disposeHooks;
 	}
 
 	/**
@@ -434,14 +412,22 @@ class NetworkSession{
 			}
 
 			if($this->enableCompression){
-				try{
+				$compressionType = ord($payload[0]);
+				$compressed = substr($payload, 1);
+				if($compressionType === CompressionAlgorithm::NONE){
+					$decompressed = $compressed;
+				}elseif($compressionType === $this->compressor->getNetworkId()){
 					Timings::$playerNetworkReceiveDecompress->startTiming();
-					$decompressed = $this->compressor->decompress($payload);
-				}catch(DecompressionException $e){
-					$this->logger->debug("Failed to decompress packet: " . base64_encode($payload));
-					throw PacketHandlingException::wrap($e, "Compressed packet batch decode error");
-				}finally{
-					Timings::$playerNetworkReceiveDecompress->stopTiming();
+					try{
+						$decompressed = $this->compressor->decompress($compressed);
+					}catch(DecompressionException $e){
+						$this->logger->debug("Failed to decompress packet: " . base64_encode($compressed));
+						throw PacketHandlingException::wrap($e, "Compressed packet batch decode error");
+					}finally{
+						Timings::$playerNetworkReceiveDecompress->stopTiming();
+					}
+				}else{
+					throw new PacketHandlingException("Packet compressed with unexpected compression type $compressionType");
 				}
 			}else{
 				$decompressed = $payload;
@@ -546,7 +532,7 @@ class NetworkSession{
 			try{
 				$stream = new ByteBufferReader($buffer);
 				try{
-					$packet->decode($stream, $this->getProtocolId());
+					$packet->decode($stream);
 				}catch(PacketDecodeException $e){
 					throw PacketHandlingException::wrap($e);
 				}
@@ -624,7 +610,7 @@ class NetworkSession{
 			$writer = new ByteBufferWriter();
 			foreach($packets as $evPacket){
 				$writer->clear(); //memory reuse let's gooooo
-				$this->addToSendBuffer(self::encodePacketTimed($writer, $this->getProtocolId(), $evPacket));
+				$this->addToSendBuffer(self::encodePacketTimed($writer, $evPacket));
 			}
 			if($immediate){
 				$this->flushGamePacketQueue();
@@ -657,11 +643,11 @@ class NetworkSession{
 	/**
 	 * @internal
 	 */
-	public static function encodePacketTimed(ByteBufferWriter $serializer, int $protocolId, ClientboundPacket $packet) : string{
+	public static function encodePacketTimed(ByteBufferWriter $serializer, ClientboundPacket $packet) : string{
 		$timings = Timings::getEncodeDataPacketTimings($packet);
 		$timings->startTiming();
 		try{
-			$packet->encode($serializer, $protocolId);
+			$packet->encode($serializer);
 			return $serializer->getData();
 		}finally{
 			$timings->stopTiming();
@@ -800,8 +786,7 @@ class NetworkSession{
 		if($this->connected && !$this->disconnectGuard){
 			$this->disconnectGuard = true;
 			$func();
-
-			/** [BETTERPMMP-PATCH] Keep disconnectGuard active through full cleanup - session is never reused */
+			$this->disconnectGuard = false;
 			$this->flushGamePacketQueue();
 			$this->sender->close("");
 			foreach($this->disposeHooks as $callback){
@@ -1211,7 +1196,7 @@ class NetworkSession{
 				CommandPermissions::NORMAL,
 				$aliasObj,
 				[
-					new CommandOverload(chaining: false, parameters: [CommandParameter::standard("args", AvailableCommandsPacket::convertArg($this->getProtocolId(), AvailableCommandsPacket::ARG_TYPE_RAWTEXT), 0, true)])
+					new CommandOverload(chaining: false, parameters: [CommandParameter::standard("args", AvailableCommandsPacket::ARG_TYPE_RAWTEXT, 0, true)])
 				],
 				chainedSubCommandData: []
 			);
@@ -1295,7 +1280,7 @@ class NetworkSession{
 	 */
 	public function startUsingChunk(int $chunkX, int $chunkZ, \Closure $onCompletion) : void{
 		$world = $this->player->getLocation()->getWorld();
-		$promiseOrPacket = ChunkCache::getInstance($world, $this->compressor)->request($chunkX, $chunkZ, $this->getTypeConverter());
+		$promiseOrPacket = ChunkCache::getInstance($world, $this->compressor)->request($chunkX, $chunkZ);
 		if(is_string($promiseOrPacket)){
 			$this->sendChunkPacket($promiseOrPacket, $onCompletion, $world);
 			return;

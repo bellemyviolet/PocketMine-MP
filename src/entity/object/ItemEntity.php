@@ -45,41 +45,6 @@ use function max;
 
 class ItemEntity extends Entity{
 
-	/** [BETTERPMMP-PATCH] FPS optimization: suppress redundant motion broadcast for stationary items in dense chunks */
-	protected function broadcastMovement(bool $teleport = false) : void{
-		if(!$teleport && $this->fpsShouldSuppressBroadcast()){
-			return;
-		}
-		parent::broadcastMovement($teleport);
-	}
-
-	protected function broadcastMotion() : void{
-		if($this->fpsShouldSuppressBroadcast()){
-			return;
-		}
-		parent::broadcastMotion();
-	}
-
-	private function fpsShouldSuppressBroadcast() : bool{
-		if(!$this->onGround) return false;
-		$m = $this->motion;
-		if($m->x !== 0.0 || $m->y !== 0.0 || $m->z !== 0.0) return false;
-		$config = \pocketmine\Server::getInstance()->getConfigGroup();
-		if(!(bool) $config->getProperty('better-pmmp.fps-optimization.item-entity.enabled', true)) return false;
-		$threshold = (int) $config->getProperty('better-pmmp.fps-optimization.item-entity.threshold-per-chunk', 16);
-		if($threshold <= 0) return false;
-		$cx = $this->location->getFloorX() >> 4;
-		$cz = $this->location->getFloorZ() >> 4;
-		$count = 0;
-		foreach($this->getWorld()->getChunkEntities($cx, $cz) as $e){
-			if($e instanceof ItemEntity){
-				$count++;
-				if($count > $threshold) return true;
-			}
-		}
-		return false;
-	}
-
 	private const TAG_HEALTH = "Health"; //TAG_Short
 	private const TAG_AGE = "Age"; //TAG_Short
 	private const TAG_PICKUP_DELAY = "PickupDelay"; //TAG_Short

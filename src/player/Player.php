@@ -263,13 +263,9 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 	private array $tickingChunks = [];
 
 	protected int $viewDistance = -1;
-	/** [BETTERPMMP-PATCH] Original view-distance requested by client (pre-clamp, pre-override). Used to re-apply per-world override on world change. */
-	protected int $requestedViewDistance = -1;
 	protected int $spawnThreshold;
 	protected int $spawnChunkLoadCount = 0;
 	protected int $chunksPerTick;
-	/** [BETTERPMMP-PATCH] FPS optimization: chunk pacing tick counter */
-	protected int $fpsChunkPacingTicks = 0;
 	protected ChunkSelector $chunkSelector;
 	protected ChunkLoader $chunkLoader;
 	protected ChunkTicker $chunkTicker;
@@ -643,21 +639,7 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 	}
 
 	public function setViewDistance(int $distance) : void{
-		/** [BETTERPMMP-PATCH] Remember the original requested distance so we can re-apply per-world override on world change */
-		$this->requestedViewDistance = $distance;
 		$newViewDistance = $this->server->getAllowedViewDistance($distance);
-
-		/** [BETTERPMMP-PATCH] Per-world view distance override */
-		$perWorldViewDistance = $this->server->getConfigGroup()->getProperty('better-pmmp.per-world-view-distance', []);
-		if(is_array($perWorldViewDistance)){
-			$currentWorld = $this->getWorld();
-			if($currentWorld !== null){
-				$worldFolder = $currentWorld->getFolderName();
-				if(isset($perWorldViewDistance[$worldFolder])){
-					$newViewDistance = max(2, (int) $perWorldViewDistance[$worldFolder]);
-				}
-			}
-		}
 
 		if($newViewDistance !== $this->viewDistance){
 			$ev = new PlayerViewDistanceChangeEvent($this, $this->viewDistance, $newViewDistance);
@@ -883,19 +865,7 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 		$count = 0;
 		$world = $this->getWorld();
 
-		/** [BETTERPMMP-PATCH] FPS optimization: chunk send pacing (smooth ramp-up) */
-		$fpsChunksPerTick = $this->chunksPerTick;
-		$fpsConfig = $this->server->getConfigGroup();
-		if((bool) $fpsConfig->getProperty('better-pmmp.fps-optimization.chunk-pacing.enabled', true)){
-			$fpsRamp = (int) $fpsConfig->getProperty('better-pmmp.fps-optimization.chunk-pacing.ramp-up-ticks', 20);
-			$fpsInitial = (int) $fpsConfig->getProperty('better-pmmp.fps-optimization.chunk-pacing.initial-chunks-per-tick', 2);
-			if($fpsRamp > 0 && $this->fpsChunkPacingTicks < $fpsRamp){
-				$fpsProgress = $this->fpsChunkPacingTicks / $fpsRamp;
-				$fpsChunksPerTick = (int) max($fpsInitial, (int) round($fpsInitial + ($this->chunksPerTick - $fpsInitial) * $fpsProgress));
-				$this->fpsChunkPacingTicks++;
-			}
-		}
-		$limit = $fpsChunksPerTick - count($this->activeChunkGenerationRequests);
+		$limit = $this->chunksPerTick - count($this->activeChunkGenerationRequests);
 		foreach($this->loadQueue as $index => $distance){
 			if($count >= $limit){
 				break;
@@ -1044,7 +1014,7 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 		$tickingChunkRadius = $world->getChunkTickRadius();
 
 		foreach($this->chunkSelector->selectChunks(
-			$this->viewDistance,
+			$this->server->getAllowedViewDistance($this->viewDistance),
 			$this->location->getFloorX() >> Chunk::COORD_BIT_SIZE,
 			$this->location->getFloorZ() >> Chunk::COORD_BIT_SIZE
 		) as $radius => $hash){
@@ -2051,11 +2021,7 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 		}
 		$ev->setModifier($meleeEnchantmentDamage, EntityDamageEvent::MODIFIER_WEAPON_ENCHANTMENTS);
 
-		/** [BETTERPMMP-PATCH] Configurable critical hit logic */
-		$config = $this->server->getConfigGroup();
-		$critMinFall = (float) $config->getProperty('better-pmmp.critical-hit.min-fall-distance', 0.5);
-		$critIgnoreSprint = (bool) $config->getProperty('better-pmmp.critical-hit.ignore-sprint', false);
-		if(($critIgnoreSprint || !$this->isSprinting()) && !$this->isFlying() && $this->fallDistance > $critMinFall && !$this->effectManager->has(VanillaEffects::BLINDNESS()) && !$this->isUnderwater()){
+		if(!$this->isSprinting() && !$this->isFlying() && $this->fallDistance > 0 && !$this->effectManager->has(VanillaEffects::BLINDNESS()) && !$this->isUnderwater()){
 			$ev->setModifier($ev->getFinalDamage() / 2, EntityDamageEvent::MODIFIER_CRITICAL);
 		}
 
@@ -2498,12 +2464,10 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 		parent::onDispose();
 	}
 
-	/** [BETTERPMMP-PATCH] Defensive reference cleanup - clear singleton reference for GC */
 	protected function destroyCycles() : void{
 		$this->networkSession = null;
 		unset($this->cursorInventory);
 		unset($this->craftingGrid);
-		unset($this->creativeInventory);
 		$this->spawnPosition = null;
 		$this->deathPosition = null;
 		$this->blockBreakHandler = null;
@@ -2631,8 +2595,6 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 		$spawn->getWorld()->requestSafeSpawn($spawn)->onCompletion(
 			function(Position $safeSpawn) : void{
 				if(!$this->isConnected()){
-					/** [BETTERPMMP-PATCH] Respawn lock reset on disconnect */
-					$this->respawnLocked = false;
 					return;
 				}
 				$this->logger->debug("Respawn position located, completing respawn");
@@ -2683,8 +2645,6 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 				$this->respawnLocked = false;
 			},
 			function() : void{
-				/** [BETTERPMMP-PATCH] Respawn lock reset on error */
-				$this->respawnLocked = false;
 				if($this->isConnected()){
 					$this->getNetworkSession()->disconnectWithError(KnownTranslationFactory::pocketmine_disconnect_error_respawn());
 				}
@@ -2774,19 +2734,10 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 	}
 
 	public function teleport(Vector3 $pos, ?float $yaw = null, ?float $pitch = null) : bool{
-		/** [BETTERPMMP-PATCH] Capture old world before parent::teleport mutates position */
-		$oldWorld = $this->getWorld();
 		if(parent::teleport($pos, $yaw, $pitch)){
 
 			$this->removeCurrentWindow();
 			$this->stopSleep();
-
-			/** [BETTERPMMP-PATCH] Re-evaluate per-world view distance using the original requested distance,
-			 * so a previous world's override does not leak into a world that has no override. */
-			if($oldWorld !== $this->getWorld()){
-				$baseDistance = $this->requestedViewDistance > 0 ? $this->requestedViewDistance : $this->server->getViewDistance();
-				$this->setViewDistance($baseDistance);
-			}
 
 			$this->sendPosition($this->location, $this->location->yaw, $this->location->pitch, MovePlayerPacket::MODE_TELEPORT);
 			$this->broadcastMovement(true);

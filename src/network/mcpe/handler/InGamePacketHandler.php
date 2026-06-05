@@ -47,7 +47,6 @@ use pocketmine\nbt\tag\CompoundTag;
 use pocketmine\nbt\tag\StringTag;
 use pocketmine\network\FilterNoisyPacketException;
 use pocketmine\network\mcpe\convert\ItemTranslator;
-use pocketmine\network\mcpe\convert\TypeConverter;
 use pocketmine\network\mcpe\InventoryManager;
 use pocketmine\network\mcpe\NetworkSession;
 use pocketmine\network\mcpe\protocol\ActorEventPacket;
@@ -95,7 +94,6 @@ use pocketmine\network\mcpe\protocol\types\PlayerAction;
 use pocketmine\network\mcpe\protocol\types\PlayerAuthInputFlags;
 use pocketmine\network\mcpe\protocol\types\PlayerBlockActionStopBreak;
 use pocketmine\network\mcpe\protocol\types\PlayerBlockActionWithBlockInfo;
-use pocketmine\network\mcpe\protocol\UpdateBlockPacket;
 use pocketmine\network\PacketHandlingException;
 use pocketmine\player\Player;
 use pocketmine\utils\AssumptionFailedError;
@@ -103,7 +101,6 @@ use pocketmine\utils\Limits;
 use pocketmine\utils\TextFormat;
 use pocketmine\utils\Utils;
 use pocketmine\world\format\Chunk;
-use pocketmine\world\World;
 use function array_push;
 use function count;
 use function fmod;
@@ -483,17 +480,22 @@ class InGamePacketHandler extends PacketHandler{
 
 				$blockPos = $data->getBlockPosition();
 				$vBlockPos = new Vector3($blockPos->getX(), $blockPos->getY(), $blockPos->getZ());
-
-				/** [BETTERPMMP-PATCH] Block lag fix - capture snapshot before interaction */
-				$oldBlockSnapshot = $this->captureBlockSnapshot($vBlockPos, $data->getFace());
-				$interactResult = $this->player->interactBlock($vBlockPos, $data->getFace(), $clickPos);
-
-				$syncAdjacentFace = null;
-				if ($data->getItemInHand()->getItemStack()->getBlockRuntimeId() === ItemTranslator::NO_BLOCK_RUNTIME_ID) {
-					$syncAdjacentFace = $data->getFace();
+				$this->player->interactBlock($vBlockPos, $data->getFace(), $clickPos);
+				if($data->getClientInteractPrediction() === PredictedResult::SUCCESS){
+					//If the item has an associated blockstate ID, this means it will only place one block.
+					//We can avoid syncing the adjacent blocks of the place position in this case, since that's only
+					//necessary if there might be multiple blocks around the placement location affected.
+					//Adjacents of the clicked block are still always synced, since it's too complicated to figure out
+					//if the client might've predicted something in this case. However, since the clicked block is always
+					//"behind" the placed block, this shouldn't affect bridging or fast placement.
+					//This would be much easier if the client would just tell us which blocks it thinks changed...
+					$syncAdjacentFace = null;
+					if($data->getItemInHand()->getItemStack()->getBlockRuntimeId() === ItemTranslator::NO_BLOCK_RUNTIME_ID){
+						$this->session->getLogger()->debug("Placing held item might place multiple blocks client-side; doing full adjacent sync");
+						$syncAdjacentFace = $data->getFace();
+					}
+					$this->syncBlocksNearby($vBlockPos, $syncAdjacentFace);
 				}
-
-				$this->syncBlocksNearby($vBlockPos, $syncAdjacentFace, $interactResult ? $oldBlockSnapshot : []);
 				return true;
 			case UseItemTransactionData::ACTION_CLICK_AIR:
 				if($this->player->isUsingItem()){
@@ -526,60 +528,26 @@ class InGamePacketHandler extends PacketHandler{
 		}
 	}
 
-	/** [BETTERPMMP-PATCH] Block lag fix - snapshot-based sync */
 	/**
-	 * @phpstan-param array<int, int> $oldBlockSnapshot
+	 * Syncs blocks nearby to ensure that the client and server agree on the world's blocks after a block interaction.
 	 */
-	private function syncBlocksNearby(Vector3 $blockPos, ?int $face, array $oldBlockSnapshot = []): void
-	{
-		if ($blockPos->distanceSquared($this->player->getLocation()) >= 10000) {
-			return;
-		}
-		$blocks = $blockPos->sidesArray();
-		$blocks[] = $blockPos;
-		if ($face !== null) {
-			$sidePos = $blockPos->getSide($face);
-			array_push($blocks, ...$sidePos->sidesArray());
-		}
-		$world = $this->player->getWorld();
-		$blockTranslator = TypeConverter::getInstance()->getBlockTranslator();
-		foreach ($world->createBlockUpdatePackets($blocks) as $packet) {
-			if (count($oldBlockSnapshot) > 0 && $packet instanceof UpdateBlockPacket) {
-				$hash = World::blockHash(
-					$packet->blockPosition->getX(),
-					$packet->blockPosition->getY(),
-					$packet->blockPosition->getZ()
-				);
-				if (isset($oldBlockSnapshot[$hash]) && $blockTranslator->internalIdToNetworkId($oldBlockSnapshot[$hash]) === $packet->blockRuntimeId) {
-					continue;
-				}
+	private function syncBlocksNearby(Vector3 $blockPos, ?int $face) : void{
+		if($blockPos->distanceSquared($this->player->getLocation()) < 10000){
+			$blocks = $blockPos->sidesArray();
+			if($face !== null){
+				$sidePos = $blockPos->getSide($face);
+
+				/** @var Vector3[] $blocks */
+				array_push($blocks, ...$sidePos->sidesArray()); //getAllSides() on each of these will include $blockPos and $sidePos because they are next to each other
+			}else{
+				$blocks[] = $blockPos;
 			}
-			$this->session->sendDataPacket($packet);
+			foreach($this->player->getWorld()->createBlockUpdatePackets($blocks) as $packet){
+				$this->session->sendDataPacket($packet);
+			}
 		}
 	}
 
-	/**
-	 * @phpstan-return array<int, int>
-	 */
-	private function captureBlockSnapshot(Vector3 $blockPos, int $face): array
-	{
-		$world = $this->player->getWorld();
-		$snapshot = [];
-		$hash = World::blockHash((int) $blockPos->x, (int) $blockPos->y, (int) $blockPos->z);
-		$snapshot[$hash] = $world->getBlockAt((int) $blockPos->x, (int) $blockPos->y, (int) $blockPos->z)->getStateId();
-		foreach ($blockPos->sidesArray() as $side) {
-			$hash = World::blockHash((int) $side->x, (int) $side->y, (int) $side->z);
-			$snapshot[$hash] = $world->getBlockAt((int) $side->x, (int) $side->y, (int) $side->z)->getStateId();
-		}
-		$sidePos = $blockPos->getSide($face);
-		$hash = World::blockHash((int) $sidePos->x, (int) $sidePos->y, (int) $sidePos->z);
-		$snapshot[$hash] = $world->getBlockAt((int) $sidePos->x, (int) $sidePos->y, (int) $sidePos->z)->getStateId();
-		foreach ($sidePos->sidesArray() as $side) {
-			$hash = World::blockHash((int) $side->x, (int) $side->y, (int) $side->z);
-			$snapshot[$hash] = $world->getBlockAt((int) $side->x, (int) $side->y, (int) $side->z)->getStateId();
-		}
-		return $snapshot;
-	}
 	private function handleUseItemOnEntityTransaction(UseItemOnEntityTransactionData $data) : bool{
 		$target = $this->player->getWorld()->getEntity($data->getActorRuntimeId());
 		//TODO: HACK! We really shouldn't be keeping disconnected players (and generally flagged-for-despawn entities)

@@ -65,9 +65,6 @@ use function sprintf;
 use function str_contains;
 use function strtolower;
 
-use function strlen;
-use function substr;
-use function rtrim;
 /**
  * Manages all the plugins
  */
@@ -95,14 +92,11 @@ class PluginManager{
 	 */
 	protected array $fileAssociations = [];
 
-	private PluginResourceIndex $resourceIndex;
-
 	public function __construct(
 		private Server $server,
 		private ?string $pluginDataDirectory,
 		private ?PluginGraylist $graylist = null
 	){
-		$this->resourceIndex = new PluginResourceIndex();
 		if($this->pluginDataDirectory !== null){
 			if(!file_exists($this->pluginDataDirectory)){
 				@mkdir($this->pluginDataDirectory, 0777, true);
@@ -128,11 +122,6 @@ class PluginManager{
 	 * @return Plugin[]
 	 * @phpstan-return array<string, Plugin>
 	 */
-	public function getResourceIndex(): PluginResourceIndex
-	{
-		return $this->resourceIndex;
-	}
-
 	public function getPlugins() : array{
 		return $this->plugins;
 	}
@@ -156,7 +145,9 @@ class PluginManager{
 			)));
 			return null;
 		}
-		/** [BETTERPMMP-PATCH-LAZY-DATAFOLDER] Data folder creation deferred to first use */
+		if(!file_exists($dataFolder)){
+			mkdir($dataFolder, 0777, true);
+		}
 
 		$prefixed = $loader->getAccessProtocol() . $path;
 		$loader->loadPlugin($prefixed);
@@ -486,33 +477,6 @@ class PluginManager{
 
 				(new PluginEnableEvent($plugin))->call();
 
-				$handlers = [];
-				foreach (HandlerListManager::global()->getAll() as $handlerList) {
-					foreach (EventPriority::ALL as $priority) {
-						foreach ($handlerList->getListenersByPriority($priority) as $listener) {
-							if ($listener->getPlugin() === $plugin) {
-								$handlers[] = $listener;
-							}
-						}
-					}
-				}
-
-				$commands = [];
-				foreach ($this->server->getCommandMap()->getCommands() as $command) {
-					if ($command instanceof PluginOwned && $command->getOwningPlugin() === $plugin) {
-						$commands[] = $command;
-					}
-				}
-
-				$permissions = [];
-				foreach ($plugin->getDescription()->getPermissions() as $permsGroup) {
-					foreach ($permsGroup as $perm) {
-						$permissions[] = $perm;
-					}
-				}
-
-				$this->resourceIndex->trackPlugin($plugin->getDescription()->getName(), $handlers, $commands, $permissions);
-
 				return true;
 			}else{
 				$this->server->getLogger()->critical($this->server->getLanguage()->translate(
@@ -566,149 +530,6 @@ class PluginManager{
 			$plugin->getScheduler()->shutdown();
 			HandlerListManager::global()->unregisterAll($plugin);
 		}
-	}
-
-
-	/** [BETTERPMMP-PATCH] reloadPlugin method */
-	public function reloadPlugin(Plugin $plugin): bool
-	{
-		$pluginName = $plugin->getDescription()->getName();
-		$logger = $this->server->getLogger();
-
-		$reflect = new \ReflectionClass(PluginBase::class);
-		$prefixedPath = $reflect->getMethod('getFile')->invoke($plugin);
-		$loader = $plugin->getPluginLoader();
-		$protocol = $loader->getAccessProtocol();
-		$rawPath = $prefixedPath;
-		if ($protocol !== '' && str_starts_with($prefixedPath, $protocol)) {
-			$rawPath = substr($prefixedPath, strlen($protocol));
-		}
-		$rawPath = rtrim($rawPath, '/' . DIRECTORY_SEPARATOR);
-
-		try {
-			$this->disablePlugin($plugin);
-		} catch (\Throwable $e) {
-			$logger->warning("Exception during disable of {$pluginName}: " . $e->getMessage());
-		}
-
-		$commandMap = $this->server->getCommandMap();
-		$commandsToRemove = [];
-		foreach ($commandMap->getCommands() as $command) {
-			if ($command instanceof PluginOwned && $command->getOwningPlugin() === $plugin) {
-				$commandsToRemove[] = $command;
-			}
-		}
-		foreach ($commandsToRemove as $command) {
-			$commandMap->unregister($command);
-		}
-
-		$permManager = PermissionManager::getInstance();
-		$opRoot = $permManager->getPermission(DefaultPermissions::ROOT_OPERATOR);
-		$everyoneRoot = $permManager->getPermission(DefaultPermissions::ROOT_USER);
-		foreach ($plugin->getDescription()->getPermissions() as $permsGroup) {
-			foreach ($permsGroup as $perm) {
-				$opRoot?->removeChild($perm->getName());
-				$everyoneRoot?->removeChild($perm->getName());
-				$permManager->removePermission($perm);
-			}
-		}
-
-		unset($this->plugins[$pluginName]);
-		unset($this->enabledPlugins[$pluginName]);
-		$this->resourceIndex->removePlugin($pluginName);
-
-		$newDescription = $loader->getPluginDescription($rawPath);
-		if ($newDescription === null) {
-			$logger->critical("Failed to reload plugin {$pluginName}: could not read plugin description from {$rawPath}");
-			return false;
-		}
-
-		$rootNamespace = ClassCacheInvalidator::detectRootNamespace($rawPath);
-		$result = ClassCacheInvalidator::invalidateChanged($rawPath, [], $this->server->getLoader(), $rootNamespace);
-		$this->resourceIndex->updateMtimeSnapshot($pluginName, $result['mtimes']);
-
-		$newPlugin = null;
-		if ($rootNamespace !== '') {
-			$mainClass = $newDescription->getMain();
-			$versionedMainClass = ClassCacheInvalidator::getVersionedClassName($mainClass, $rootNamespace, $result['version']);
-
-			if (class_exists($versionedMainClass, false) && is_a($versionedMainClass, Plugin::class, true)) {
-				foreach (Utils::stringifyKeys($newDescription->getPermissions()) as $default => $perms) {
-					foreach ($perms as $perm) {
-						if ($permManager->getPermission($perm->getName()) !== null) {
-							$permManager->removePermission($perm);
-						}
-						$permManager->addPermission($perm);
-						match ($default) {
-							PermissionParser::DEFAULT_TRUE => $everyoneRoot?->addChild($perm->getName(), true),
-							PermissionParser::DEFAULT_OP => $opRoot?->addChild($perm->getName(), true),
-							PermissionParser::DEFAULT_NOT_OP => [$everyoneRoot?->addChild($perm->getName(), true), $opRoot?->addChild($perm->getName(), false)],
-							default => null,
-						};
-					}
-				}
-
-				$dataFolder = $this->getDataDirectory($rawPath, $newDescription->getName());
-				/** [BETTERPMMP-PATCH-LAZY-DATAFOLDER] Data folder creation deferred to first use */
-
-				$prefixed = $loader->getAccessProtocol() . $rawPath;
-				$loader->loadPlugin($prefixed);
-
-				try {
-					$newPlugin = new $versionedMainClass($loader, $this->server, $newDescription, $dataFolder, $prefixed, new DiskResourceProvider($prefixed . '/resources/'));
-				} catch (\Throwable $e) {
-					$logger->critical("Failed to reload plugin {$pluginName}: " . $e->getMessage());
-					$logger->logException($e);
-					return false;
-				}
-
-				$this->plugins[$newPlugin->getDescription()->getName()] = $newPlugin;
-				$logger->info("Plugin {$pluginName} reloaded (version {$result['version']})");
-			} else {
-				$logger->warning("Versioned class {$versionedMainClass} unavailable for {$pluginName}, using standard reload");
-				try {
-					$newPlugin = $this->internalLoadPlugin($rawPath, $loader, $newDescription);
-				} catch (\Throwable $e) {
-					$logger->critical("Failed to reload {$pluginName}: " . $e->getMessage());
-					$logger->logException($e);
-					return false;
-				}
-			}
-		} else {
-			try {
-				$newPlugin = $this->internalLoadPlugin($rawPath, $loader, $newDescription);
-			} catch (\Throwable $e) {
-				$logger->critical("Failed to reload plugin {$pluginName}: " . $e->getMessage());
-				$logger->logException($e);
-				return false;
-			}
-		}
-
-		if ($newPlugin === null) {
-			$logger->critical("Failed to reload plugin {$pluginName}: internalLoadPlugin returned null");
-			return false;
-		}
-
-		try {
-			if (!$this->enablePlugin($newPlugin)) {
-				$logger->critical("Failed to enable plugin {$pluginName} after reload");
-				unset($this->plugins[$newPlugin->getDescription()->getName()]);
-				return false;
-			}
-		} catch (\Throwable $e) {
-			$logger->critical("Exception enabling plugin {$pluginName}: " . $e->getMessage());
-			$logger->logException($e);
-			unset($this->plugins[$newPlugin->getDescription()->getName()]);
-			return false;
-		}
-
-		$descriptions = [];
-		foreach ($this->plugins as $p) {
-			$descriptions[] = $p->getDescription();
-		}
-		$this->resourceIndex->buildReverseDependencyMap($descriptions);
-
-		return true;
 	}
 
 	public function tickSchedulers(int $currentTick) : void{

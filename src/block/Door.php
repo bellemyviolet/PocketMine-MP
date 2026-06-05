@@ -23,7 +23,6 @@ declare(strict_types=1);
 
 namespace pocketmine\block;
 
-use pocketmine\block\BlockTypeIds;
 use pocketmine\block\utils\HorizontalFacing;
 use pocketmine\block\utils\HorizontalFacingTrait;
 use pocketmine\block\utils\SupportType;
@@ -140,11 +139,7 @@ class Door extends Transparent implements HorizontalFacing{
 		return false;
 	}
 
-	/** [BETTERPMMP-PATCH] Iron door: block onInteract completely */
 	public function onInteract(Item $item, int $face, Vector3 $clickVector, ?Player $player = null, array &$returnedItems = []) : bool{
-		if($this->getTypeId() === BlockTypeIds::IRON_DOOR){
-			return true;
-		}
 		$this->open = !$this->open;
 
 		$other = $this->getSide($this->top ? Facing::DOWN : Facing::UP);
