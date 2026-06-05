@@ -97,6 +97,9 @@ player:
 level-settings:
   #The default format that worlds will use when created
   default-format: leveldb
+  #The minimum Y level an entity can go before taking damage from the void
+  #Default PM sets this as -80 but NetherGames makes this configurable and the default is 0
+  min-y: 0
 
 chunk-sending:
   #To change server normal render distance, change view-distance in server.properties.
@@ -205,3 +208,66 @@ plugins:
   #False will place plugin data under plugin_data under --data.
   #This option exists for backwards compatibility with existing installations.
   legacy-data-dir: false
+
+# [BETTERPMMP-PATCH] Extreme optimization settings
+better-pmmp:
+  # Fixed light: skip async LightPopulationTask entirely.
+  # Fills server-side light arrays with a fixed value instead of running BFS flood-fill on worker threads.
+  # Performance gain: eliminates AsyncTask submission, igbinary serialization, and BFS light calculation.
+  # NOTE: This does NOT affect client-side rendering. Bedrock clients calculate their own lighting.
+  # Server-side light values are used only for mob spawning conditions and similar server logic.
+  fixed-light:
+    enabled: true
+    level: 15
+  # Per-world view distance override. Overrides server.properties view-distance per world folder name.
+  # Example: lobby: 4
+  per-world-view-distance: {}
+  # Advanced chunk optimization settings.
+  chunk-optimization:
+    # Max chunks to recheck tick eligibility per tick. Prevents tick spikes on mass teleport. 0 = unlimited.
+    batch-recheck-limit: 64
+  # Per-world chunk ticking override. Overrides global chunk-ticking settings per world folder name.
+  # Example:
+  #   lobby:
+  #     tick-radius: 0
+  #     blocks-per-subchunk-per-tick: 0
+  per-world-chunk-ticking: {}
+  # Critical hit settings
+  critical-hit:
+    # If true, critical hits can land even while sprinting. Vanilla requires not sprinting.
+    ignore-sprint: false
+    # Minimum fall distance required for a critical hit. Vanilla: 0.5. Set to 0.0 to trigger even from ground.
+    min-fall-distance: 0.5
+  # Maximum cached Block instances per world.
+  block-cache-size: 8192
+  # [BETTERPMMP-PATCH] Client-side FPS optimization
+  # Reduces redundant/out-of-range packets sent to players to relieve client frame drops.
+  # All filters preserve gameplay correctness — teleport and forced sync bypass every filter.
+  fps-optimization:
+    # Skip Entity broadcastMovement/broadcastMotion for viewers beyond motion-distance blocks.
+    # Also suppresses redundant broadcasts when position/rotation/motion did not actually change.
+    entity-broadcast:
+      enabled: true
+      motion-distance: 96
+      position-epsilon: 0.001
+      rotation-epsilon: 0.5
+      motion-epsilon: 0.0001
+    # World::addParticle / addSound viewer filtering by squared distance.
+    particle-sound:
+      enabled: true
+      particle-distance: 48
+      sound-distance: 32
+    # Entity::broadcastAnimation viewer filtering.
+    animation:
+      enabled: true
+      distance: 64
+    # Smooth chunk delivery for the first ramp-up-ticks ticks after teleport/spawn.
+    chunk-pacing:
+      enabled: true
+      initial-chunks-per-tick: 2
+      ramp-up-ticks: 20
+    # When a chunk has more than threshold-per-chunk ItemEntities, suppress broadcastMovement
+    # for items that are stationary on the ground. Pickup and merge still work normally.
+    item-entity:
+      enabled: true
+      threshold-per-chunk: 16

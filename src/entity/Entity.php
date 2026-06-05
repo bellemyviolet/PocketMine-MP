@@ -29,6 +29,7 @@ namespace pocketmine\entity;
 use pocketmine\block\Block;
 use pocketmine\block\Water;
 use pocketmine\entity\animation\Animation;
+use pocketmine\entity\animation\ItemAnimation;
 use pocketmine\event\entity\EntityDamageEvent;
 use pocketmine\event\entity\EntityDespawnEvent;
 use pocketmine\event\entity\EntityExtinguishEvent;
@@ -46,6 +47,7 @@ use pocketmine\nbt\tag\DoubleTag;
 use pocketmine\nbt\tag\FloatTag;
 use pocketmine\nbt\tag\ListTag;
 use pocketmine\nbt\tag\StringTag;
+use pocketmine\network\mcpe\convert\TypeConverter;
 use pocketmine\network\mcpe\EntityEventBroadcaster;
 use pocketmine\network\mcpe\NetworkBroadcastUtils;
 use pocketmine\network\mcpe\protocol\AddActorPacket;
@@ -120,6 +122,10 @@ abstract class Entity{
 
 	/** @var Block[]|null */
 	protected ?array $blocksAround = null;
+	/** [BETTERPMMP-PATCH] Smart blocksAround cache tracking */
+	private int $lastBlockFloorX = PHP_INT_MIN;
+	private int $lastBlockFloorY = PHP_INT_MIN;
+	private int $lastBlockFloorZ = PHP_INT_MIN;
 
 	protected Location $location;
 	protected Location $lastLocation;
@@ -595,7 +601,8 @@ abstract class Entity{
 	 * Sets the health of the Entity. This won't send any update to the players
 	 */
 	public function setHealth(float $amount) : void{
-		if($amount === $this->health){
+		/** [BETTERPMMP-PATCH] Float-safe health comparison using epsilon */
+		if(abs($amount - $this->health) < 1e-6){
 			return;
 		}
 
@@ -661,7 +668,7 @@ abstract class Entity{
 		}
 		$this->checkBlockIntersectionsNextTick = true;
 
-		if($this->location->y <= World::Y_MIN - 16 && $this->isAlive()){
+		if($this->location->y <= $this->getWorld()->getDamageY() && $this->isAlive()){
 			$ev = new EntityDamageEvent($this, EntityDamageEvent::CAUSE_VOID, 10);
 			$this->attack($ev);
 			$hasUpdate = true;
@@ -798,26 +805,122 @@ abstract class Entity{
 		return $vector3;
 	}
 
+	/** [BETTERPMMP-PATCH] FPS optimization state */
+	protected float $fpsLastBroadcastX = NAN;
+	protected float $fpsLastBroadcastY = NAN;
+	protected float $fpsLastBroadcastZ = NAN;
+	protected float $fpsLastBroadcastYaw = NAN;
+	protected float $fpsLastBroadcastPitch = NAN;
+	protected bool $fpsLastBroadcastGround = false;
+	protected float $fpsLastBroadcastMotionX = 0.0;
+	protected float $fpsLastBroadcastMotionY = 0.0;
+	protected float $fpsLastBroadcastMotionZ = 0.0;
+
+	/**
+	 * @param array<int, \pocketmine\player\Player> $viewers
+	 * @return array<int, \pocketmine\player\Player>
+	 */
+	private function filterFpsBroadcastViewers(array $viewers, bool $teleport) : array{
+		if($teleport || count($viewers) === 0){
+			return $viewers;
+		}
+		$config = \pocketmine\Server::getInstance()->getConfigGroup();
+		if(!(bool) $config->getProperty('better-pmmp.fps-optimization.entity-broadcast.enabled', true)){
+			return $viewers;
+		}
+		$maxDist = (float) $config->getProperty('better-pmmp.fps-optimization.entity-broadcast.motion-distance', 96);
+		if($maxDist <= 0){
+			return $viewers;
+		}
+		$maxSq = $maxDist * $maxDist;
+		$ex = $this->location->x;
+		$ez = $this->location->z;
+		$out = [];
+		foreach($viewers as $k => $pl){
+			$loc = $pl->getLocation();
+			$dx = $loc->x - $ex;
+			$dz = $loc->z - $ez;
+			if($dx * $dx + $dz * $dz <= $maxSq){
+				$out[$k] = $pl;
+			}
+		}
+		return $out;
+	}
+
+	private function fpsRedundantMovementSuppressed(float $x, float $y, float $z, float $yaw, float $pitch, bool $ground) : bool{
+		$config = \pocketmine\Server::getInstance()->getConfigGroup();
+		if(!(bool) $config->getProperty('better-pmmp.fps-optimization.entity-broadcast.enabled', true)){
+			return false;
+		}
+		if(is_nan($this->fpsLastBroadcastX) || $ground !== $this->fpsLastBroadcastGround){
+			return false;
+		}
+		$posEps = (float) $config->getProperty('better-pmmp.fps-optimization.entity-broadcast.position-epsilon', 0.001);
+		$rotEps = (float) $config->getProperty('better-pmmp.fps-optimization.entity-broadcast.rotation-epsilon', 0.5);
+		$dx = $x - $this->fpsLastBroadcastX; $dy = $y - $this->fpsLastBroadcastY; $dz = $z - $this->fpsLastBroadcastZ;
+		if($dx * $dx + $dy * $dy + $dz * $dz > $posEps * $posEps){
+			return false;
+		}
+		$dyaw = $yaw - $this->fpsLastBroadcastYaw;
+		$dpitch = $pitch - $this->fpsLastBroadcastPitch;
+		if($dyaw < 0) $dyaw = -$dyaw;
+		if($dpitch < 0) $dpitch = -$dpitch;
+		return $dyaw <= $rotEps && $dpitch <= $rotEps;
+	}
+
+	private function fpsRedundantMotionSuppressed(float $mx, float $my, float $mz) : bool{
+		$config = \pocketmine\Server::getInstance()->getConfigGroup();
+		if(!(bool) $config->getProperty('better-pmmp.fps-optimization.entity-broadcast.enabled', true)){
+			return false;
+		}
+		$eps = (float) $config->getProperty('better-pmmp.fps-optimization.entity-broadcast.motion-epsilon', 0.0001);
+		$dx = $mx - $this->fpsLastBroadcastMotionX;
+		$dy = $my - $this->fpsLastBroadcastMotionY;
+		$dz = $mz - $this->fpsLastBroadcastMotionZ;
+		if($dx < 0) $dx = -$dx; if($dy < 0) $dy = -$dy; if($dz < 0) $dz = -$dz;
+		if($dx > $eps || $dy > $eps || $dz > $eps) return false;
+		$mxA = $mx; if($mxA < 0) $mxA = -$mxA;
+		$myA = $my; if($myA < 0) $myA = -$myA;
+		$mzA = $mz; if($mzA < 0) $mzA = -$mzA;
+		return $mxA <= $eps && $myA <= $eps && $mzA <= $eps;
+	}
+
 	protected function broadcastMovement(bool $teleport = false) : void{
-		NetworkBroadcastUtils::broadcastPackets($this->hasSpawned, [MoveActorAbsolutePacket::create(
+		/** [BETTERPMMP-PATCH] FPS optimization: redundancy check + distance filter */
+		$fpsGround = $this->onGround;
+		$fpsX = $this->location->x; $fpsY = $this->location->y; $fpsZ = $this->location->z;
+		$fpsYaw = $this->location->yaw; $fpsPitch = $this->location->pitch;
+		if(!$teleport && $this->fpsRedundantMovementSuppressed($fpsX, $fpsY, $fpsZ, $fpsYaw, $fpsPitch, $fpsGround)){
+			return;
+		}
+		$fpsTargets = $this->filterFpsBroadcastViewers($this->hasSpawned, $teleport);
+		if(count($fpsTargets) === 0){
+			$this->fpsLastBroadcastX = $fpsX; $this->fpsLastBroadcastY = $fpsY; $this->fpsLastBroadcastZ = $fpsZ;
+			$this->fpsLastBroadcastYaw = $fpsYaw; $this->fpsLastBroadcastPitch = $fpsPitch; $this->fpsLastBroadcastGround = $fpsGround;
+			return;
+		}
+		NetworkBroadcastUtils::broadcastPackets($fpsTargets, [MoveActorAbsolutePacket::create(
 			$this->id,
 			$this->getOffsetPosition($this->location),
-			$this->location->pitch,
-			$this->location->yaw,
-			$this->location->yaw,
-			(
-				//TODO: We should be setting FLAG_TELEPORT here to disable client-side movement interpolation, but it
-				//breaks player teleporting (observers see the player rubberband back to the pre-teleport position while
-				//the teleported player sees themselves at the correct position), and does nothing whatsoever for
-				//non-player entities (movement is still interpolated). Both of these are client bugs.
-				//See https://github.com/pmmp/PocketMine-MP/issues/4394
-				($this->onGround ? MoveActorAbsolutePacket::FLAG_GROUND : 0)
-			)
+			$fpsPitch,
+			$fpsYaw,
+			$fpsYaw,
+			($fpsGround ? MoveActorAbsolutePacket::FLAG_GROUND : 0)
 		)]);
+		$this->fpsLastBroadcastX = $fpsX; $this->fpsLastBroadcastY = $fpsY; $this->fpsLastBroadcastZ = $fpsZ;
+		$this->fpsLastBroadcastYaw = $fpsYaw; $this->fpsLastBroadcastPitch = $fpsPitch; $this->fpsLastBroadcastGround = $fpsGround;
 	}
 
 	protected function broadcastMotion() : void{
-		NetworkBroadcastUtils::broadcastPackets($this->hasSpawned, [SetActorMotionPacket::create($this->id, $this->getMotion(), tick: 0)]);
+		/** [BETTERPMMP-PATCH] FPS optimization: motion redundancy + distance filter */
+		$fpsMotion = $this->getMotion();
+		if($this->fpsRedundantMotionSuppressed($fpsMotion->x, $fpsMotion->y, $fpsMotion->z)){
+			return;
+		}
+		$fpsTargets = $this->filterFpsBroadcastViewers($this->hasSpawned, false);
+		$this->fpsLastBroadcastMotionX = $fpsMotion->x; $this->fpsLastBroadcastMotionY = $fpsMotion->y; $this->fpsLastBroadcastMotionZ = $fpsMotion->z;
+		if(count($fpsTargets) === 0) return;
+		NetworkBroadcastUtils::broadcastPackets($fpsTargets, [SetActorMotionPacket::create($this->id, $fpsMotion, tick: 0)]);
 	}
 
 	public function getGravity() : float{
@@ -862,7 +965,12 @@ abstract class Entity{
 			$friction *= $this->getWorld()->getBlockAt((int) floor($this->location->x), (int) floor($this->location->y - 1), (int) floor($this->location->z))->getFrictionFactor();
 		}
 
-		$this->motion = new Vector3($this->motion->x * $friction, $mY, $this->motion->z * $friction);
+		/** [BETTERPMMP-PATCH] Motion epsilon cleanup - zeroes sub-threshold components after friction */
+		$mX = $this->motion->x * $friction;
+		$mZ = $this->motion->z * $friction;
+		$this->motion->x = abs($mX) < 1.0E-6 ? 0.0 : $mX;
+		$this->motion->y = abs($mY) < 1.0E-6 ? 0.0 : $mY;
+		$this->motion->z = abs($mZ) < 1.0E-6 ? 0.0 : $mZ;
 	}
 
 	protected function checkObstruction(float $x, float $y, float $z) : bool{
@@ -1151,8 +1259,6 @@ abstract class Entity{
 	}
 
 	protected function move(float $dx, float $dy, float $dz) : void{
-		$this->blocksAround = null;
-
 		Timings::$entityMove->startTiming();
 		Timings::$entityMoveCollision->startTiming();
 
@@ -1243,15 +1349,21 @@ abstract class Entity{
 		}
 		Timings::$entityMoveCollision->stopTiming();
 
-		$this->location = new Location(
-			($this->boundingBox->minX + $this->boundingBox->maxX) / 2,
-			$this->boundingBox->minY - $this->ySize,
-			($this->boundingBox->minZ + $this->boundingBox->maxZ) / 2,
-			$this->location->world,
-			$this->location->yaw,
-			$this->location->pitch
-		);
+		/** [BETTERPMMP-PATCH] In-place location update - avoids new Location() allocation per move */
+		$this->location->x = ($this->boundingBox->minX + $this->boundingBox->maxX) / 2;
+		$this->location->y = $this->boundingBox->minY - $this->ySize;
+		$this->location->z = ($this->boundingBox->minZ + $this->boundingBox->maxZ) / 2;
 
+		/** [BETTERPMMP-PATCH] Smart blocksAround cache - invalidate only when block grid position changes post-move */
+		$newFloorX = (int) floor($this->location->x);
+		$newFloorY = (int) floor($this->location->y);
+		$newFloorZ = (int) floor($this->location->z);
+		if($newFloorX !== $this->lastBlockFloorX || $newFloorY !== $this->lastBlockFloorY || $newFloorZ !== $this->lastBlockFloorZ){
+			$this->blocksAround = null;
+			$this->lastBlockFloorX = $newFloorX;
+			$this->lastBlockFloorY = $newFloorY;
+			$this->lastBlockFloorZ = $newFloorZ;
+		}
 		$this->getWorld()->onEntityMoved($this);
 		$this->checkBlockIntersections();
 		$this->checkGroundState($wantedX, $wantedY, $wantedZ, $dx, $dy, $dz);
@@ -1668,6 +1780,10 @@ abstract class Entity{
 		NetworkBroadcastUtils::broadcastEntityEvent($targets, fn(EntityEventBroadcaster $broadcaster, array $recipients) => $broadcaster->syncActorData($recipients, $this, $data));
 	}
 
+	public function isValid() : bool{
+		return $this->location->isValid();
+	}
+
 	/**
 	 * @return MetadataProperty[]
 	 * @phpstan-return array<int, MetadataProperty>
@@ -1719,7 +1835,54 @@ abstract class Entity{
 	 * @param Player[]|null $targets
 	 */
 	public function broadcastAnimation(Animation $animation, ?array $targets = null) : void{
-		NetworkBroadcastUtils::broadcastPackets($targets ?? $this->getViewers(), $animation->encode());
+		/** [BETTERPMMP-PATCH] FPS optimization: animation viewer distance filter */
+		$fpsTargets = $targets ?? $this->getViewers();
+		if($targets === null){
+			$fpsTargets = $this->filterFpsAnimationViewers($fpsTargets);
+		}
+		if(count($fpsTargets) === 0){
+			return;
+		}
+
+		if($animation instanceof ItemAnimation){
+			TypeConverter::broadcastByTypeConverter($fpsTargets, function(TypeConverter $typeConverter) use ($animation) : array{
+				$animation->setItemTranslator($typeConverter->getItemTranslator());
+				return $animation->encode();
+			});
+		}else{
+			NetworkBroadcastUtils::broadcastPackets($fpsTargets, $animation->encode());
+		}
+	}
+
+	/**
+	 * @param array<int, Player> $viewers
+	 * @return array<int, Player>
+	 */
+	private function filterFpsAnimationViewers(array $viewers) : array{
+		if(count($viewers) === 0){
+			return $viewers;
+		}
+		$config = Server::getInstance()->getConfigGroup();
+		if(!(bool) $config->getProperty('better-pmmp.fps-optimization.animation.enabled', true)){
+			return $viewers;
+		}
+		$maxDist = (float) $config->getProperty('better-pmmp.fps-optimization.animation.distance', 64);
+		if($maxDist <= 0){
+			return $viewers;
+		}
+		$maxSq = $maxDist * $maxDist;
+		$ex = $this->location->x;
+		$ez = $this->location->z;
+		$out = [];
+		foreach($viewers as $k => $pl){
+			$loc = $pl->getLocation();
+			$dx = $loc->x - $ex;
+			$dz = $loc->z - $ez;
+			if($dx * $dx + $dz * $dz <= $maxSq){
+				$out[$k] = $pl;
+			}
+		}
+		return $out;
 	}
 
 	/**

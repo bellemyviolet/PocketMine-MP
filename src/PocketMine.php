@@ -187,7 +187,8 @@ namespace pocketmine {
 			$logger->warning("Debugging assertions are enabled. This may degrade performance. To disable them, set `zend.assertions = -1` in php.ini.");
 		}
 		if(\Phar::running(true) === ""){
-			$logger->warning("Non-packaged installation detected. This will degrade autoloading speed and make startup times longer.");
+			/** [BETTERPMMP-PATCH] Start warning replaced */
+		$logger->info("§aBetterPMMP By UserX0001");
 		}
 		if(function_exists('opcache_get_status') && ($opcacheStatus = opcache_get_status(false)) !== false){
 			$jitEnabled = $opcacheStatus["jit"]["on"] ?? false;
@@ -268,19 +269,7 @@ JIT_WARNING
 		}
 		require_once($bootstrap);
 
-		$composerGitHash = InstalledVersions::getReference('pocketmine/pocketmine-mp');
-		if($composerGitHash !== null){
-			//we can't verify dependency versions if we were installed without using git
-			$currentGitHash = explode("-", VersionInfo::GIT_HASH(), 2)[0];
-			if($currentGitHash !== $composerGitHash){
-				critical_error("Composer dependencies and/or autoloader are out of sync.");
-				critical_error("- Current revision is $currentGitHash");
-				critical_error("- Composer dependencies were last synchronized for revision $composerGitHash");
-				critical_error("Out-of-sync Composer dependencies may result in crashes and classes not being found.");
-				critical_error("Please synchronize Composer dependencies before running the server.");
-				exit(1);
-			}
-		}
+		/** [BETTERPMMP-PATCH] Composer sync check bypassed for source folder execution */
 
 		ErrorToExceptionHandler::set();
 
@@ -299,6 +288,8 @@ JIT_WARNING
 		$pluginPath = getopt_string(BootstrapOptions::PLUGINS) ?? $cwd . DIRECTORY_SEPARATOR . "plugins";
 		Filesystem::addCleanedPath($pluginPath, Filesystem::CLEAN_PATH_PLUGINS_PREFIX);
 
+		/** [BETTERPMMP-PATCH] Create system subdirectory */
+		@mkdir($dataPath . DIRECTORY_SEPARATOR . "system", 0777, true);
 		if(!@mkdir($dataPath, 0777, true) && !is_dir($dataPath)){
 			critical_error("Unable to create/access data directory at $dataPath. Check that the target location is accessible by the current user.");
 			exit(1);
@@ -306,7 +297,7 @@ JIT_WARNING
 		//this has to be done after we're sure the data path exists
 		$dataPath = realpath($dataPath) . DIRECTORY_SEPARATOR;
 
-		$lockFilePath = Path::join($dataPath, 'server.lock');
+		$lockFilePath = Path::join($dataPath, "system", 'server.lock');
 		try{
 			$pid = Filesystem::createLockFile($lockFilePath);
 		}catch(\InvalidArgumentException $e){
@@ -337,9 +328,9 @@ JIT_WARNING
 		}else{
 			Terminal::init();
 		}
-		$logFile = isset($opts[BootstrapOptions::NO_LOG_FILE]) ? null : Path::join($dataPath, "server.log");
+		$logFile = isset($opts[BootstrapOptions::NO_LOG_FILE]) ? null : Path::join($dataPath, "system", "server.log");
 
-		$logger = new MainLogger($logFile, Terminal::hasFormattingCodes(), "Server", new \DateTimeZone(Timezone::get()), false, Path::join($dataPath, "log_archive"));
+		$logger = new MainLogger($logFile, Terminal::hasFormattingCodes(), "Server", new \DateTimeZone(Timezone::get()), false, Path::join($dataPath, "system", "log_archive"));
 		if($logFile === null){
 			$logger->notice("Logging to file disabled. Ensure logs are collected by other means (e.g. Docker logs).");
 		}

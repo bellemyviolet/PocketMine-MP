@@ -524,6 +524,7 @@ final class KnownTranslationKeys{
 	public const POCKETMINE_PERMISSION_COMMAND_OP_TAKE = "pocketmine.permission.command.op.take";
 	public const POCKETMINE_PERMISSION_COMMAND_PARTICLE = "pocketmine.permission.command.particle";
 	public const POCKETMINE_PERMISSION_COMMAND_PLUGINS = "pocketmine.permission.command.plugins";
+	public const POCKETMINE_PERMISSION_COMMAND_RELOAD = "pocketmine.permission.command.reload";
 	public const POCKETMINE_PERMISSION_COMMAND_SAVE_DISABLE = "pocketmine.permission.command.save.disable";
 	public const POCKETMINE_PERMISSION_COMMAND_SAVE_ENABLE = "pocketmine.permission.command.save.enable";
 	public const POCKETMINE_PERMISSION_COMMAND_SAVE_PERFORM = "pocketmine.permission.command.save.perform";

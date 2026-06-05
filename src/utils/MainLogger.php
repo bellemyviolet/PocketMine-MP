@@ -189,7 +189,17 @@ class MainLogger extends AttachableThreadSafeLogger implements \BufferedLogger{
 			$threadName = (new \ReflectionClass($thread))->getShortName() . " thread";
 		}
 
-		$message = sprintf($this->format, $time->format("H:i:s.v"), $color, $threadName, $prefix, TextFormat::addBase($color, TextFormat::clean($message, false)));
+		/** [BETTERPMMP-PATCH] INFO prefix removed for cleaner output */
+		if($prefix === "INFO"){
+			$message = sprintf(
+				TextFormat::AQUA . "[%s] " . TextFormat::RESET . "%s%s" . TextFormat::RESET,
+				$time->format("H:i:s.v"),
+				$color,
+				TextFormat::addBase($color, TextFormat::clean($message, false))
+			);
+		}else{
+			$message = sprintf($this->format, $time->format("H:i:s.v"), $color, $threadName, $prefix, TextFormat::addBase($color, TextFormat::clean($message, false)));
+		}
 
 		if(!Terminal::isInit()){
 			Terminal::init($this->useFormattingCodes); //lazy-init colour codes because we don't know if they've been registered on this thread

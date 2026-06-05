@@ -69,6 +69,7 @@ final class YmlServerProperties{
 	public const DEBUG_LEVEL = 'debug.level';
 	public const LEVEL_SETTINGS = 'level-settings';
 	public const LEVEL_SETTINGS_DEFAULT_FORMAT = 'level-settings.default-format';
+	public const LEVEL_SETTINGS_MIN_Y = 'level-settings.min-y';
 	public const MEMORY = 'memory';
 	public const MEMORY_ASYNC_WORKER_HARD_LIMIT = 'memory.async-worker-hard-limit';
 	public const MEMORY_CHECK_RATE = 'memory.check-rate';
@@ -108,5 +109,38 @@ final class YmlServerProperties{
 	public const TICKS_PER_AUTOSAVE = 'ticks-per.autosave';
 	public const TIMINGS = 'timings';
 	public const TIMINGS_HOST = 'timings.host';
+	/** [BETTERPMMP-PATCH] BetterPMMP optimization config constants */
+	public const BETTER_PMMP = 'better-pmmp';
+	public const BETTER_PMMP_FIXED_LIGHT = 'better-pmmp.fixed-light';
+	public const BETTER_PMMP_FIXED_LIGHT_ENABLED = 'better-pmmp.fixed-light.enabled';
+	public const BETTER_PMMP_FIXED_LIGHT_LEVEL = 'better-pmmp.fixed-light.level';
+	public const BETTER_PMMP_PER_WORLD_VIEW_DISTANCE = 'better-pmmp.per-world-view-distance';
+	public const BETTER_PMMP_CHUNK_OPTIMIZATION = 'better-pmmp.chunk-optimization';
+	public const BETTER_PMMP_CHUNK_OPTIMIZATION_BATCH_RECHECK_LIMIT = 'better-pmmp.chunk-optimization.batch-recheck-limit';
+	public const BETTER_PMMP_PER_WORLD_CHUNK_TICKING = 'better-pmmp.per-world-chunk-ticking';
+
+	/** [BETTERPMMP-PATCH] Critical hit config constants */
+	public const BETTER_PMMP_CRITICAL_HIT = 'better-pmmp.critical-hit';
+	public const BETTER_PMMP_CRITICAL_HIT_IGNORE_SPRINT = 'better-pmmp.critical-hit.ignore-sprint';
+	public const BETTER_PMMP_CRITICAL_HIT_MIN_FALL_DISTANCE = 'better-pmmp.critical-hit.min-fall-distance';
+	public const BETTER_PMMP_BLOCK_CACHE_SIZE = 'better-pmmp.block-cache-size';
+	/** [BETTERPMMP-PATCH] FPS optimization config constants */
+	public const BETTER_PMMP_FPS_OPTIMIZATION = 'better-pmmp.fps-optimization';
+	public const BETTER_PMMP_FPS_ENTITY_BROADCAST_ENABLED = 'better-pmmp.fps-optimization.entity-broadcast.enabled';
+	public const BETTER_PMMP_FPS_ENTITY_BROADCAST_MOTION_DISTANCE = 'better-pmmp.fps-optimization.entity-broadcast.motion-distance';
+	public const BETTER_PMMP_FPS_ENTITY_BROADCAST_POSITION_EPSILON = 'better-pmmp.fps-optimization.entity-broadcast.position-epsilon';
+	public const BETTER_PMMP_FPS_ENTITY_BROADCAST_ROTATION_EPSILON = 'better-pmmp.fps-optimization.entity-broadcast.rotation-epsilon';
+	public const BETTER_PMMP_FPS_ENTITY_BROADCAST_MOTION_EPSILON = 'better-pmmp.fps-optimization.entity-broadcast.motion-epsilon';
+	public const BETTER_PMMP_FPS_PARTICLE_SOUND_ENABLED = 'better-pmmp.fps-optimization.particle-sound.enabled';
+	public const BETTER_PMMP_FPS_PARTICLE_SOUND_PARTICLE_DISTANCE = 'better-pmmp.fps-optimization.particle-sound.particle-distance';
+	public const BETTER_PMMP_FPS_PARTICLE_SOUND_SOUND_DISTANCE = 'better-pmmp.fps-optimization.particle-sound.sound-distance';
+	public const BETTER_PMMP_FPS_ANIMATION_ENABLED = 'better-pmmp.fps-optimization.animation.enabled';
+	public const BETTER_PMMP_FPS_ANIMATION_DISTANCE = 'better-pmmp.fps-optimization.animation.distance';
+	public const BETTER_PMMP_FPS_CHUNK_PACING_ENABLED = 'better-pmmp.fps-optimization.chunk-pacing.enabled';
+	public const BETTER_PMMP_FPS_CHUNK_PACING_INITIAL = 'better-pmmp.fps-optimization.chunk-pacing.initial-chunks-per-tick';
+	public const BETTER_PMMP_FPS_CHUNK_PACING_RAMP_TICKS = 'better-pmmp.fps-optimization.chunk-pacing.ramp-up-ticks';
+	public const BETTER_PMMP_FPS_ITEM_ENTITY_ENABLED = 'better-pmmp.fps-optimization.item-entity.enabled';
+	public const BETTER_PMMP_FPS_ITEM_ENTITY_THRESHOLD = 'better-pmmp.fps-optimization.item-entity.threshold-per-chunk';
+
 	public const WORLDS = 'worlds';
 }

@@ -76,9 +76,13 @@ class HandlerList{
 	 * @param RegisteredListener[] $listeners
 	 * @phpstan-param array<RegisteredListener<TEvent>> $listeners
 	 */
+	/** [BETTERPMMP-PATCH] Batch register listeners - single cache invalidation instead of N+1 */
 	public function registerAll(array $listeners) : void{
 		foreach($listeners as $listener){
-			$this->register($listener);
+			if(isset($this->handlerSlots[$listener->getPriority()][spl_object_id($listener)])){
+				throw new \InvalidArgumentException("This listener is already registered to priority {$listener->getPriority()} of event {$this->class}");
+			}
+			$this->handlerSlots[$listener->getPriority()][spl_object_id($listener)] = $listener;
 		}
 		$this->invalidateAffectedCaches();
 	}
@@ -146,16 +150,24 @@ class HandlerList{
 			$handlerLists[] = $currentList;
 		}
 
+		/** [BETTERPMMP-PATCH] Single-pass handler list merge - O(n) instead of O(n^2) */
 		$listenersByPriority = [];
 		foreach($handlerLists as $currentList){
 			foreach($currentList->handlerSlots as $priority => $listeners){
-				$listenersByPriority[$priority] = array_merge($listenersByPriority[$priority] ?? [], $listeners);
+				$listenersByPriority[$priority][] = $listeners;
 			}
 		}
 
-		//TODO: why on earth do the priorities have higher values for lower priority?
 		krsort($listenersByPriority, SORT_NUMERIC);
 
-		return $this->handlerCache->list = array_merge(...$listenersByPriority);
+		$result = [];
+		foreach($listenersByPriority as $listenersArrays){
+			foreach($listenersArrays as $listeners){
+				foreach($listeners as $listener){
+					$result[] = $listener;
+				}
+			}
+		}
+		return $this->handlerCache->list = $result;
 	}
 }
