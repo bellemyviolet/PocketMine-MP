@@ -124,8 +124,8 @@ use function floor;
 use function get_class;
 use function gettype;
 use function in_array;
-use function is_array;
 use function is_a;
+use function is_array;
 use function is_object;
 use function max;
 use function microtime;
@@ -1090,12 +1090,6 @@ class World implements ChunkManager{
 	}
 
 	/**
-	 * @param Vector3[] $blocks
-	 *
-	 * @return ClientboundPacket[]
-	 * @phpstan-return list<ClientboundPacket>
-	 */
-	/**
 	 * Returns whether anti-xray chunk obfuscation is enabled for this world. Configured in pocketmine.yml under
 	 * "anti-xray.enabled-worlds" (a list of world folder names). The result is cached for the world's lifetime.
 	 */
@@ -1129,6 +1123,12 @@ class World implements ChunkManager{
 		return $result;
 	}
 
+	/**
+	 * @param Vector3[] $blocks
+	 *
+	 * @return ClientboundPacket[]
+	 * @phpstan-return list<ClientboundPacket>
+	 */
 	public function createBlockUpdatePackets(array $blocks) : array{
 		$packets = [];
 

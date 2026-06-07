@@ -185,8 +185,8 @@ class ChunkRequestTask extends AsyncTask{
 	}
 
 	/**
-	 * @param array<int, Chunk>  $chunks    chunks keyed by World::chunkHash
-	 * @param array<int, true>   $replaceable replaceable block state ids
+	 * @param array<int, Chunk> $chunks      chunks keyed by World::chunkHash
+	 * @param array<int, true>  $replaceable replaceable block state ids
 	 */
 	private function isReplaceableAt(array $chunks, array $replaceable, int $worldX, int $worldY, int $worldZ) : bool{
 		$subY = $worldY >> SubChunk::COORD_BIT_SIZE;
