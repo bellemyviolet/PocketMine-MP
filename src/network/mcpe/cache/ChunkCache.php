@@ -88,6 +88,8 @@ class ChunkCache implements ChunkListener{
 	private int $hits = 0;
 	private int $misses = 0;
 
+	private bool $antiXray;
+
 	/**
 	 * @phpstan-param DimensionIds::* $dimensionId
 	 */
@@ -95,7 +97,9 @@ class ChunkCache implements ChunkListener{
 		private World $world,
 		private Compressor $compressor,
 		private int $dimensionId = DimensionIds::OVERWORLD
-	){}
+	){
+		$this->antiXray = $world->isAntiXrayEnabled();
+	}
 
 	private function prepareChunkAsync(int $chunkX, int $chunkZ, int $chunkHash) : CompressBatchPromise{
 		$this->world->registerChunkListener($this, $chunkX, $chunkZ);
@@ -110,14 +114,28 @@ class ChunkCache implements ChunkListener{
 			$promise = new CompressBatchPromise();
 
 			$this->world->getServer()->getAsyncPool()->submitTask(
-				new ChunkRequestTask(
-					$chunkX,
-					$chunkZ,
-					$this->dimensionId,
-					$chunk,
-					$promise,
-					$this->compressor
-				)
+				$this->antiXray ?
+					new ChunkRequestTask(
+						$chunkX,
+						$chunkZ,
+						$this->dimensionId,
+						$chunk,
+						$promise,
+						$this->compressor,
+						true,
+						$this->world->getChunk($chunkX, $chunkZ - 1),
+						$this->world->getChunk($chunkX, $chunkZ + 1),
+						$this->world->getChunk($chunkX + 1, $chunkZ),
+						$this->world->getChunk($chunkX - 1, $chunkZ)
+					) :
+					new ChunkRequestTask(
+						$chunkX,
+						$chunkZ,
+						$this->dimensionId,
+						$chunk,
+						$promise,
+						$this->compressor
+					)
 			);
 			$this->caches[$chunkHash] = $promise;
 			$promise->onResolve(function(CompressBatchPromise $promise) use ($chunkHash) : void{

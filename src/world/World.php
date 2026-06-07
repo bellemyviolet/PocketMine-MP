@@ -123,6 +123,8 @@ use function count;
 use function floor;
 use function get_class;
 use function gettype;
+use function in_array;
+use function is_array;
 use function is_a;
 use function is_object;
 use function max;
@@ -301,6 +303,9 @@ class World implements ChunkManager{
 	 * @phpstan-var array<ChunkPosHash, array<ChunkBlockPosHash, Vector3>>
 	 */
 	private array $changedBlocks = [];
+
+	/** Cached result of the anti-xray world check (pocketmine.yml "anti-xray.enabled-worlds"). */
+	private ?bool $antiXrayEnabled = null;
 
 	/** @phpstan-var ReversePriorityQueue<int, Vector3> */
 	private ReversePriorityQueue $scheduledBlockUpdateQueue;
@@ -1027,7 +1032,8 @@ class World implements ChunkManager{
 							$p->onChunkChanged($chunkX, $chunkZ, $chunk);
 						}
 					}else{
-						foreach($this->createBlockUpdatePackets($blocks) as $packet){
+						$updateBlocks = $this->isAntiXrayEnabled() ? $this->expandAntiXrayBlockUpdates($blocks) : $blocks;
+						foreach($this->createBlockUpdatePackets($updateBlocks) as $packet){
 							$this->broadcastPacketToPlayersUsingChunk($chunkX, $chunkZ, $packet);
 						}
 					}
@@ -1089,6 +1095,40 @@ class World implements ChunkManager{
 	 * @return ClientboundPacket[]
 	 * @phpstan-return list<ClientboundPacket>
 	 */
+	/**
+	 * Returns whether anti-xray chunk obfuscation is enabled for this world. Configured in pocketmine.yml under
+	 * "anti-xray.enabled-worlds" (a list of world folder names). The result is cached for the world's lifetime.
+	 */
+	public function isAntiXrayEnabled() : bool{
+		if($this->antiXrayEnabled === null){
+			$worlds = $this->getServer()->getConfigGroup()->getProperty("anti-xray.enabled-worlds", []);
+			$this->antiXrayEnabled = is_array($worlds) && in_array($this->getFolderName(), $worlds, true);
+		}
+		return $this->antiXrayEnabled;
+	}
+
+	/**
+	 * Anti-xray: when a block changes, its hidden face neighbours may become exposed. Those neighbours may have been
+	 * replaced with fake ores in the chunk packet sent to the client, so their real states are re-sent alongside the
+	 * changed blocks to correct the client. Only the six face neighbours can be newly exposed by a single change.
+	 *
+	 * @param Vector3[] $blocks
+	 * @phpstan-param array<int, Vector3> $blocks
+	 *
+	 * @return Vector3[]
+	 * @phpstan-return array<int, Vector3>
+	 */
+	private function expandAntiXrayBlockUpdates(array $blocks) : array{
+		$result = [];
+		foreach($blocks as $block){
+			$result[World::blockHash($block->getFloorX(), $block->getFloorY(), $block->getFloorZ())] = $block;
+			foreach($block->sides() as $side){
+				$result[World::blockHash($side->getFloorX(), $side->getFloorY(), $side->getFloorZ())] = $side;
+			}
+		}
+		return $result;
+	}
+
 	public function createBlockUpdatePackets(array $blocks) : array{
 		$packets = [];
 
