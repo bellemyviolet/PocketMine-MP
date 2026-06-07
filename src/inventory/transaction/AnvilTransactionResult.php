@@ -30,15 +30,21 @@ use pocketmine\utils\Utils;
  * @internal
  */
 final class AnvilTransactionResult{
+	/** @var list<Item> */
+	private array $consumedItems;
+
 	/**
 	 * @param Item[] $consumedItems
+	 * @phpstan-param list<Item> $consumedItems
 	 */
 	public function __construct(
 		private Item $result,
-		private array $consumedItems,
+		array $consumedItems,
 		private int $xpCost,
 		private bool $renameOnly
-	){}
+	){
+		$this->consumedItems = $consumedItems;
+	}
 
 	public function getResult() : Item{
 		return clone $this->result;
@@ -46,6 +52,7 @@ final class AnvilTransactionResult{
 
 	/**
 	 * @return Item[]
+	 * @phpstan-return list<Item>
 	 */
 	public function getConsumedItems() : array{
 		return Utils::cloneObjectArray($this->consumedItems);
