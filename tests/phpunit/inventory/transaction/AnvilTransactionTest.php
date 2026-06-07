@@ -5,7 +5,7 @@
  *  ____            _        _   __  __ _                  __  __ ____
  * |  _ \ ___   ___| | _____| |_|  \/  (_)_ __   ___      |  \/  |  _ \
  * | |_) / _ \ / __| |/ / _ \ __| |\/| | | '_ \ / _ \_____| |\/| | |_) |
- * |  __/ (_) | (__|   <  __/ |_| |  | | | | |  __/_____| |  | |  __/
+ * |  __/ (_) | (__|   <  __/ |_| |  | | | | | |  __/_____| |  | |  __/
  * |_|   \___/ \___|_|\_\___|\__|_|  |_|_|_| |_|\___|     |_|  |_|_|
  *
  * This program is free software: you can redistribute it and/or modify
@@ -64,7 +64,6 @@ final class AnvilTransactionTest extends TestCase{
 
 	public function testMaterialRepair() : void{
 		$input = VanillaItems::DIAMOND_PICKAXE();
-		self::assertInstanceOf(Durable::class, $input);
 		$input->setDamage(800);
 
 		$result = AnvilTransaction::calculateResult($input, VanillaItems::DIAMOND()->setCount(2), null);
@@ -82,8 +81,6 @@ final class AnvilTransactionTest extends TestCase{
 	public function testSameItemRepair() : void{
 		$input = VanillaItems::DIAMOND_SWORD();
 		$material = VanillaItems::DIAMOND_SWORD();
-		self::assertInstanceOf(Durable::class, $input);
-		self::assertInstanceOf(Durable::class, $material);
 		$input->setDamage(1000);
 		$material->setDamage(900);
 

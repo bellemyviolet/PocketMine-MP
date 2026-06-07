@@ -5,7 +5,7 @@
  *  ____            _        _   __  __ _                  __  __ ____
  * |  _ \ ___   ___| | _____| |_|  \/  (_)_ __   ___      |  \/  |  _ \
  * | |_) / _ \ / __| |/ / _ \ __| |\/| | | '_ \ / _ \_____| |\/| | |_) |
- * |  __/ (_) | (__|   <  __/ |_| |  | | | | |  __/_____| |  | |  __/
+ * |  __/ (_) | (__|   <  __/ |_| |  | | | | | |  __/_____| |  | |  __/
  * |_|   \___/ \___|_|\_\___|\__|_|  |_|_|_| |_|\___|     |_|  |_|_|
  *
  * This program is free software: you can redistribute it and/or modify
@@ -239,6 +239,8 @@ class AnvilTransaction extends InventoryTransaction{
 	/**
 	 * @param Item[] $expectedItems
 	 * @param Item[] $actualItems
+	 * @phpstan-param list<Item> $expectedItems
+	 * @phpstan-param list<Item> $actualItems
 	 */
 	private static function assertItemListMatches(array $expectedItems, array $actualItems, string $description) : void{
 		$expectedItems = Utils::cloneObjectArray($expectedItems);
