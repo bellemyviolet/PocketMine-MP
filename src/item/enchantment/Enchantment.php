@@ -80,6 +80,19 @@ class Enchantment{
 	}
 
 	/**
+	 * Returns the base anvil XP cost multiplier for this enchantment.
+	 */
+	public function getAnvilCost() : int{
+		return match($this->rarity){
+			Rarity::COMMON,
+			Rarity::UNCOMMON => 1,
+			Rarity::RARE => 2,
+			Rarity::MYTHIC => 4,
+			default => 1
+		};
+	}
+
+	/**
 	 * Returns a bitset indicating what item types can have this item applied from an enchanting table.
 	 *
 	 * @deprecated

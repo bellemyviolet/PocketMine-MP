@@ -23,11 +23,13 @@ declare(strict_types=1);
 
 namespace pocketmine\network\mcpe\handler;
 
+use pocketmine\block\inventory\AnvilInventory;
 use pocketmine\block\inventory\EnchantInventory;
 use pocketmine\inventory\Inventory;
 use pocketmine\inventory\transaction\action\CreateItemAction;
 use pocketmine\inventory\transaction\action\DestroyItemAction;
 use pocketmine\inventory\transaction\action\DropItemAction;
+use pocketmine\inventory\transaction\AnvilTransaction;
 use pocketmine\inventory\transaction\CraftingTransaction;
 use pocketmine\inventory\transaction\EnchantingTransaction;
 use pocketmine\inventory\transaction\InventoryTransaction;
@@ -42,6 +44,7 @@ use pocketmine\network\mcpe\protocol\types\inventory\FullContainerName;
 use pocketmine\network\mcpe\protocol\types\inventory\stackrequest\CraftingConsumeInputStackRequestAction;
 use pocketmine\network\mcpe\protocol\types\inventory\stackrequest\CraftingCreateSpecificResultStackRequestAction;
 use pocketmine\network\mcpe\protocol\types\inventory\stackrequest\CraftRecipeAutoStackRequestAction;
+use pocketmine\network\mcpe\protocol\types\inventory\stackrequest\CraftRecipeOptionalStackRequestAction;
 use pocketmine\network\mcpe\protocol\types\inventory\stackrequest\CraftRecipeStackRequestAction;
 use pocketmine\network\mcpe\protocol\types\inventory\stackrequest\CreativeCreateStackRequestAction;
 use pocketmine\network\mcpe\protocol\types\inventory\stackrequest\DeprecatedCraftingResultsStackRequestAction;
@@ -147,7 +150,7 @@ class ItemStackRequestExecutor{
 	 * @throws ItemStackRequestProcessException
 	 */
 	protected function removeItemFromSlot(ItemStackRequestSlotInfo $slotInfo, int $count) : Item{
-		if($slotInfo->getContainerName()->getContainerId() === ContainerUIIds::CREATED_OUTPUT && $slotInfo->getSlotId() === UIInventorySlotOffset::CREATED_ITEM_OUTPUT){
+		if($this->isCreatedOutputSlot($slotInfo)){
 			//special case for the "created item" output slot
 			//TODO: do we need to send a response for this slot info?
 			return $this->takeCreatedItem($count);
@@ -168,6 +171,12 @@ class ItemStackRequestExecutor{
 		$inventory->setItem($slot, $existingItem);
 
 		return $removed;
+	}
+
+	private function isCreatedOutputSlot(ItemStackRequestSlotInfo $slotInfo) : bool{
+		$containerId = $slotInfo->getContainerName()->getContainerId();
+		return ($containerId === ContainerUIIds::CREATED_OUTPUT && $slotInfo->getSlotId() === UIInventorySlotOffset::CREATED_ITEM_OUTPUT) ||
+			$containerId === ContainerUIIds::ANVIL_RESULT_PREVIEW;
 	}
 
 	/**
@@ -265,6 +274,37 @@ class ItemStackRequestExecutor{
 	/**
 	 * @throws ItemStackRequestProcessException
 	 */
+	protected function beginAnvilTransaction(?string $rename) : void{
+		if($this->specialTransaction !== null){
+			throw new ItemStackRequestProcessException("Another special transaction is already in progress");
+		}
+
+		$currentWindow = $this->player->getCurrentWindow();
+		if(!$currentWindow instanceof AnvilInventory){
+			throw new ItemStackRequestProcessException("Player's current window is not an anvil inventory");
+		}
+
+		try{
+			$result = AnvilTransaction::calculateResult(
+				clone $currentWindow->getItem(AnvilInventory::SLOT_INPUT),
+				clone $currentWindow->getItem(AnvilInventory::SLOT_MATERIAL),
+				$rename
+			);
+		}catch(\InvalidArgumentException $e){
+			throw new ItemStackRequestProcessException($e->getMessage(), 0, $e);
+		}
+		if($result === null){
+			throw new ItemStackRequestProcessException("No anvil result is available");
+		}
+
+		$holder = $currentWindow->getHolder();
+		$this->specialTransaction = new AnvilTransaction($this->player, $holder->getWorld()->getBlock($holder), $result);
+		$this->setNextCreatedItem($result->getResult());
+	}
+
+	/**
+	 * @throws ItemStackRequestProcessException
+	 */
 	protected function takeCreatedItem(int $count) : Item{
 		if($count < 1){
 			//this should be impossible at the protocol level, but in case of buggy core code this will prevent exploits
@@ -353,9 +393,15 @@ class ItemStackRequestExecutor{
 			}
 		}elseif($action instanceof CraftRecipeAutoStackRequestAction){
 			$this->beginCrafting($action->getRecipeId(), $action->getRepetitions());
+		}elseif($action instanceof CraftRecipeOptionalStackRequestAction){
+			$filterStrings = $this->request->getFilterStrings();
+			$filterStringIndex = $action->getFilterStringIndex();
+			$this->beginAnvilTransaction($filterStringIndex >= 0 ? ($filterStrings[$filterStringIndex] ?? null) : null);
 		}elseif($action instanceof CraftingConsumeInputStackRequestAction){
-			$this->assertDoingCrafting();
-			$this->removeItemFromSlot($action->getSource(), $action->getCount()); //output discarded - we allow CraftingTransaction to verify the balance
+			if(!$this->specialTransaction instanceof AnvilTransaction){
+				$this->assertDoingCrafting();
+			}
+			$this->removeItemFromSlot($action->getSource(), $action->getCount()); //output discarded - we allow the special transaction to verify the balance
 
 		}elseif($action instanceof CraftingCreateSpecificResultStackRequestAction){
 			$this->assertDoingCrafting();

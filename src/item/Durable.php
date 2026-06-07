@@ -118,6 +118,13 @@ abstract class Durable extends Item{
 		return $this->damage >= $this->getMaxDurability() || $this->isNull();
 	}
 
+	/**
+	 * Returns whether this item can be repaired on an anvil using the given material item.
+	 */
+	public function isValidAnvilRepairMaterial(Item $material) : bool{
+		return false;
+	}
+
 	protected function deserializeCompoundTag(CompoundTag $tag) : void{
 		parent::deserializeCompoundTag($tag);
 		$this->unbreakable = $tag->getByte("Unbreakable", 0) !== 0;

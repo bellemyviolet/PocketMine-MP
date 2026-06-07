@@ -23,6 +23,8 @@ declare(strict_types=1);
 
 namespace pocketmine\item;
 
+use pocketmine\block\VanillaBlocks;
+
 abstract class TieredTool extends Tool{
 	protected ToolTier $tier;
 
@@ -60,5 +62,40 @@ abstract class TieredTool extends Tool{
 
 	public function isFireProof() : bool{
 		return $this->tier === ToolTier::NETHERITE;
+	}
+
+	public function isValidAnvilRepairMaterial(Item $material) : bool{
+		return match($this->tier){
+			ToolTier::WOOD => self::isPlanks($material),
+			ToolTier::STONE => VanillaBlocks::COBBLESTONE()->asItem()->equals($material, false, false),
+			ToolTier::COPPER => $material->getTypeId() === ItemTypeIds::COPPER_INGOT,
+			ToolTier::IRON => $material->getTypeId() === ItemTypeIds::IRON_INGOT,
+			ToolTier::GOLD => $material->getTypeId() === ItemTypeIds::GOLD_INGOT,
+			ToolTier::DIAMOND => $material->getTypeId() === ItemTypeIds::DIAMOND,
+			ToolTier::NETHERITE => $material->getTypeId() === ItemTypeIds::NETHERITE_INGOT
+		};
+	}
+
+	private static function isPlanks(Item $material) : bool{
+		foreach([
+			VanillaBlocks::ACACIA_PLANKS(),
+			VanillaBlocks::BAMBOO_PLANKS(),
+			VanillaBlocks::BIRCH_PLANKS(),
+			VanillaBlocks::CHERRY_PLANKS(),
+			VanillaBlocks::CRIMSON_PLANKS(),
+			VanillaBlocks::DARK_OAK_PLANKS(),
+			VanillaBlocks::JUNGLE_PLANKS(),
+			VanillaBlocks::MANGROVE_PLANKS(),
+			VanillaBlocks::OAK_PLANKS(),
+			VanillaBlocks::PALE_OAK_PLANKS(),
+			VanillaBlocks::SPRUCE_PLANKS(),
+			VanillaBlocks::WARPED_PLANKS(),
+		] as $planks){
+			if($planks->asItem()->equals($material, false, false)){
+				return true;
+			}
+		}
+
+		return false;
 	}
 }

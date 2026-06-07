@@ -70,6 +70,7 @@ class Item implements \JsonSerializable{
 
 	public const TAG_DISPLAY_NAME = "Name";
 	public const TAG_DISPLAY_LORE = "Lore";
+	public const TAG_REPAIR_COST = "RepairCost";
 
 	public const TAG_KEEP_ON_DEATH = "minecraft:keep_on_death";
 
@@ -85,6 +86,7 @@ class Item implements \JsonSerializable{
 	protected string $customName = "";
 	/** @var string[] */
 	protected array $lore = [];
+	protected int $anvilRepairCost = 0;
 	/** TODO: this needs to die in a fire */
 	protected ?CompoundTag $blockEntityTag = null;
 
@@ -166,6 +168,34 @@ class Item implements \JsonSerializable{
 	 */
 	public function clearCustomName() : Item{
 		$this->setCustomName("");
+		return $this;
+	}
+
+	/**
+	 * Returns the cumulative prior-work penalty used by anvils.
+	 */
+	public function getAnvilRepairCost() : int{
+		return $this->anvilRepairCost;
+	}
+
+	/**
+	 * Sets the cumulative prior-work penalty used by anvils.
+	 *
+	 * @return $this
+	 */
+	public function setAnvilRepairCost(int $repairCost) : Item{
+		if($repairCost < 0){
+			throw new \InvalidArgumentException("Repair cost must be greater than or equal to 0");
+		}
+		$this->anvilRepairCost = $repairCost;
+		return $this;
+	}
+
+	/**
+	 * @return $this
+	 */
+	public function clearAnvilRepairCost() : Item{
+		$this->anvilRepairCost = 0;
 		return $this;
 	}
 
@@ -289,6 +319,7 @@ class Item implements \JsonSerializable{
 	protected function deserializeCompoundTag(CompoundTag $tag) : void{
 		$this->customName = "";
 		$this->lore = [];
+		$this->anvilRepairCost = 0;
 
 		$display = $tag->getCompoundTag(self::TAG_DISPLAY);
 		if($display !== null){
@@ -335,6 +366,11 @@ class Item implements \JsonSerializable{
 		}
 
 		$this->keepOnDeath = $tag->getByte(self::TAG_KEEP_ON_DEATH, 0) !== 0;
+
+		$repairCost = $tag->getInt(self::TAG_REPAIR_COST, 0);
+		if($repairCost > 0){
+			$this->anvilRepairCost = $repairCost;
+		}
 	}
 
 	protected function serializeCompoundTag(CompoundTag $tag) : void{
@@ -403,6 +439,10 @@ class Item implements \JsonSerializable{
 		}else{
 			$tag->removeTag(self::TAG_KEEP_ON_DEATH);
 		}
+
+		$this->anvilRepairCost > 0 ?
+			$tag->setInt(self::TAG_REPAIR_COST, $this->anvilRepairCost) :
+			$tag->removeTag(self::TAG_REPAIR_COST);
 	}
 
 	public function getCount() : int{

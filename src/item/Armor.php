@@ -83,6 +83,20 @@ class Armor extends Durable{
 		return $this->armorInfo->getMaterial()->getEnchantability();
 	}
 
+	public function isValidAnvilRepairMaterial(Item $material) : bool{
+		return match($this->armorInfo->getMaterial()){
+			VanillaArmorMaterials::LEATHER() => $material->getTypeId() === ItemTypeIds::LEATHER,
+			VanillaArmorMaterials::CHAINMAIL(),
+			VanillaArmorMaterials::IRON() => $material->getTypeId() === ItemTypeIds::IRON_INGOT,
+			VanillaArmorMaterials::COPPER() => $material->getTypeId() === ItemTypeIds::COPPER_INGOT,
+			VanillaArmorMaterials::GOLD() => $material->getTypeId() === ItemTypeIds::GOLD_INGOT,
+			VanillaArmorMaterials::DIAMOND() => $material->getTypeId() === ItemTypeIds::DIAMOND,
+			VanillaArmorMaterials::NETHERITE() => $material->getTypeId() === ItemTypeIds::NETHERITE_INGOT,
+			VanillaArmorMaterials::TURTLE() => $material->getTypeId() === ItemTypeIds::SCUTE,
+			default => false
+		};
+	}
+
 	/**
 	 * Returns the dyed colour of this armour piece. This generally only applies to leather armour.
 	 */
